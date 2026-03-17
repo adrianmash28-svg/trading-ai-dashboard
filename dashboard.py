@@ -538,8 +538,8 @@ elif page == "Live Market":
 
     watchlist = ["AAPL", "NVDA", "META", "MSFT", "TSLA", "AMZN", "SPY", "QQQ"]
 
-    left, right = st.columns([1, 3], gap="large")
-
+    left, right = st.columns([0.9, 4.6], gap="large")
+  
     with left:
         st.markdown("### Market Panel")
 
