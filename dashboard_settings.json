@@ -1,0 +1,24 @@
+{
+  "bot_name": "MashGPT",
+  "page_title": "Mash Trading Dashboard",
+  "theme": "gray",
+  "layout_density": "normal",
+  "chart_height": 400,
+  "refresh_seconds": 60,
+  "symbols": [
+    "META",
+    "NVDA",
+    "AAPL",
+    "MSFT"
+  ],
+  "tab_order": [
+    "Dashboard",
+    "Live Signals",
+    "Paper Trades",
+    "MashGPT"
+  ],
+  "show_backtest": true,
+  "show_drawdown": true,
+  "show_paper_trades": true,
+  "show_live_signals": true
+}

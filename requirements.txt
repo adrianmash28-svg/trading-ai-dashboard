@@ -1,0 +1,8 @@
+streamlit
+streamlit-autorefresh
+pandas
+matplotlib
+yfinance
+mplfinance
+requests
+openai

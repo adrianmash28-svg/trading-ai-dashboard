@@ -1,0 +1,8 @@
+symbol,bias,score,entry,stop_loss,take_profit_1,take_profit_2,risk_per_share,shares,atr_14,relative_volume,change_pct,why_picked
+AAPL,SHORT,60,250.12,251.29,247.77,246.6,1.17,85,0.78,4.54,0.03,"below 20-bar average, high relative volume, near recent intraday low"
+TSLA,SHORT,60,391.17,393.51,386.49,384.15,2.34,42,1.56,1.89,-0.0,"below 20-bar average, high relative volume, near recent intraday low"
+NVDA,SHORT,60,180.26,181.15,178.5,177.61,0.88,113,0.59,2.37,-0.09,"below 20-bar average, high relative volume, near recent intraday low"
+SPY,SHORT,60,662.3,664.38,658.15,656.07,2.08,48,1.38,2.81,0.09,"below 20-bar average, high relative volume, near recent intraday low"
+QQQ,SHORT,60,593.69,595.72,589.64,587.61,2.03,49,1.35,2.22,0.12,"below 20-bar average, high relative volume, near recent intraday low"
+MSFT,SHORT,60,395.61,397.26,392.3,390.65,1.65,60,1.1,2.56,0.19,"below 20-bar average, high relative volume, near recent intraday low"
+AVGO,SHORT,60,322.17,324.53,317.45,315.08,2.36,42,1.57,2.32,0.08,"below 20-bar average, high relative volume, near recent intraday low"

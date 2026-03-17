@@ -1,0 +1,4 @@
+strategy,in_total_trades,in_win_rate_pct,in_total_pnl,in_avg_r,out_total_trades,out_win_rate_pct,out_total_pnl,out_avg_r,out_max_losing_streak,oos_score
+C_Weak_Stock_Weak_Market,33,60.61,2176.01,0.659,12,41.67,339.63,0.283,6,689.48
+A_Breakdown_Continuation,18,44.44,-248.91,-0.138,7,42.86,113.86,0.163,4,409.66
+B_Pop_And_Fade,15,80.0,771.84,0.515,3,33.33,-24.29,-0.081,2,101.86
