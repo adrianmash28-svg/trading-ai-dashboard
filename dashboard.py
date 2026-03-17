@@ -689,122 +689,122 @@ elif page == "MashGPT":
 
 
     elif page == "Live Market":
-    st.subheader("Live Market")
+        st.subheader("Live Market")
 
-    if "live_market_symbol" not in st.session_state:
-        st.session_state["live_market_symbol"] = "NVDA"
-
-    watchlist = ["AAPL", "NVDA", "META", "MSFT", "TSLA", "AMZN", "SPY", "QQQ"]
-
-    left, right = st.columns([1, 2.8], gap="large")
-
-    with left:
-        st.markdown("### Watchlist")
-
-        default_symbol = st.session_state.get("live_market_symbol", "NVDA")
-        default_index = watchlist.index(default_symbol) if default_symbol in watchlist else 0
-
-        selected_symbol = st.selectbox(
-            "Select Symbol",
-            options=watchlist,
-            index=default_index,
-        )
-
-        custom_symbol = st.text_input(
-            "Or search ticker",
-            value=st.session_state.get("live_market_symbol", selected_symbol)
-        ).upper().strip()
-
-        if custom_symbol:
-            selected_symbol = custom_symbol
-
-        st.session_state["live_market_symbol"] = selected_symbol
-
-        timeframe = st.selectbox(
-            "Timeframe",
-            ["1", "5", "15", "30", "60", "D", "W"],
-            index=4,
-            help="1=1m, 5=5m, 15=15m, 30=30m, 60=1h, D=1 day, W=1 week",
-        )
-
-        market_df = fetch_history(
-            selected_symbol,
-            period="6mo" if timeframe in ["D", "W"] else "5d",
-            interval="1d" if timeframe in ["D", "W"] else "15m",
-        )
-
-        if not market_df.empty:
-            latest_close = float(market_df["Close"].iloc[-1])
-            first_close = float(market_df["Close"].iloc[0])
-            change_pct = ((latest_close - first_close) / first_close) * 100 if first_close != 0 else 0.0
-            latest_volume = int(market_df["Volume"].iloc[-1])
-            high_val = float(market_df["High"].max())
-            low_val = float(market_df["Low"].min())
-
-            st.markdown("### Stats")
-            s1, s2 = st.columns(2)
-            s1.metric("Last", round(latest_close, 2))
-            s2.metric("Change %", round(change_pct, 2))
-
-            s3, s4 = st.columns(2)
-            s3.metric("High", round(high_val, 2))
-            s4.metric("Low", round(low_val, 2))
-
-            st.metric("Volume", f"{latest_volume:,}")
-        else:
-            st.warning(f"No data found for {selected_symbol}")
-
-        st.markdown("### Quick Picks")
-        q1, q2 = st.columns(2)
-        if q1.button("NVDA", use_container_width=True):
+        if "live_market_symbol" not in st.session_state:
             st.session_state["live_market_symbol"] = "NVDA"
-            st.rerun()
-        if q2.button("AAPL", use_container_width=True):
-            st.session_state["live_market_symbol"] = "AAPL"
-            st.rerun()
 
-        q3, q4 = st.columns(2)
-        if q3.button("TSLA", use_container_width=True):
-            st.session_state["live_market_symbol"] = "TSLA"
-            st.rerun()
-        if q4.button("SPY", use_container_width=True):
-            st.session_state["live_market_symbol"] = "SPY"
-            st.rerun()
+        watchlist = ["AAPL", "NVDA", "META", "MSFT", "TSLA", "AMZN", "SPY", "QQQ"]
 
-    with right:
-        st.markdown(f"### {selected_symbol} Chart")
+        left, right = st.columns([1, 2.8], gap="large")
 
-        tradingview_html = f"""
-        <div class="tradingview-widget-container" style="height:820px;width:100%">
-          <div id="tradingview_chart"></div>
-          <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
-          <script type="text/javascript">
-            new TradingView.widget({{
-              "autosize": true,
-              "symbol": "{selected_symbol}",
-              "interval": "{timeframe}",
-              "timezone": "America/New_York",
-              "theme": "dark",
-              "style": "1",
-              "locale": "en",
-              "toolbar_bg": "#0b1220",
-              "enable_publishing": false,
-              "allow_symbol_change": true,
-              "hide_top_toolbar": false,
-              "hide_legend": false,
-              "save_image": false,
-              "withdateranges": true,
-              "studies": [
-                "Volume@tv-basicstudies"
-              ],
-              "container_id": "tradingview_chart"
-            }});
-          </script>
-        </div>
-        """
+        with left:
+            st.markdown("### Watchlist")
 
-        components.html(tradingview_html, height=840)
+            default_symbol = st.session_state.get("live_market_symbol", "NVDA")
+            default_index = watchlist.index(default_symbol) if default_symbol in watchlist else 0
 
-        if not market_df.empty:
-            st.markdown("### Raw Data")
-            st.dataframe(market_df.tail(100), use_container_width=True, height=220)
+            selected_symbol = st.selectbox(
+                "Select Symbol",
+                options=watchlist,
+                index=default_index,
+            )
+
+            custom_symbol = st.text_input(
+                "Or search ticker",
+                value=st.session_state.get("live_market_symbol", selected_symbol)
+            ).upper().strip()
+
+            if custom_symbol:
+                selected_symbol = custom_symbol
+
+            st.session_state["live_market_symbol"] = selected_symbol
+
+            timeframe = st.selectbox(
+                "Timeframe",
+                ["1", "5", "15", "30", "60", "D", "W"],
+                index=4,
+                help="1=1m, 5=5m, 15=15m, 30=30m, 60=1h, D=1 day, W=1 week",
+            )
+
+            market_df = fetch_history(
+                selected_symbol,
+                period="6mo" if timeframe in ["D", "W"] else "5d",
+                interval="1d" if timeframe in ["D", "W"] else "15m",
+            )
+
+            if not market_df.empty:
+                latest_close = float(market_df["Close"].iloc[-1])
+                first_close = float(market_df["Close"].iloc[0])
+                change_pct = ((latest_close - first_close) / first_close) * 100 if first_close != 0 else 0.0
+                latest_volume = int(market_df["Volume"].iloc[-1])
+                high_val = float(market_df["High"].max())
+                low_val = float(market_df["Low"].min())
+
+                st.markdown("### Stats")
+                s1, s2 = st.columns(2)
+                s1.metric("Last", round(latest_close, 2))
+                s2.metric("Change %", round(change_pct, 2))
+
+                s3, s4 = st.columns(2)
+                s3.metric("High", round(high_val, 2))
+                s4.metric("Low", round(low_val, 2))
+
+                st.metric("Volume", f"{latest_volume:,}")
+            else:
+                st.warning(f"No data found for {selected_symbol}")
+
+            st.markdown("### Quick Picks")
+            q1, q2 = st.columns(2)
+            if q1.button("NVDA", use_container_width=True):
+                st.session_state["live_market_symbol"] = "NVDA"
+                st.rerun()
+            if q2.button("AAPL", use_container_width=True):
+                st.session_state["live_market_symbol"] = "AAPL"
+                st.rerun()
+
+            q3, q4 = st.columns(2)
+            if q3.button("TSLA", use_container_width=True):
+                st.session_state["live_market_symbol"] = "TSLA"
+                st.rerun()
+            if q4.button("SPY", use_container_width=True):
+                st.session_state["live_market_symbol"] = "SPY"
+                st.rerun()
+
+        with right:
+            st.markdown(f"### {selected_symbol} Chart")
+
+            tradingview_html = f"""
+            <div class="tradingview-widget-container" style="height:820px;width:100%">
+              <div id="tradingview_chart"></div>
+              <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+              <script type="text/javascript">
+                new TradingView.widget({{
+                  "autosize": true,
+                  "symbol": "{selected_symbol}",
+                  "interval": "{timeframe}",
+                  "timezone": "America/New_York",
+                  "theme": "dark",
+                  "style": "1",
+                  "locale": "en",
+                  "toolbar_bg": "#0b1220",
+                  "enable_publishing": false,
+                  "allow_symbol_change": true,
+                  "hide_top_toolbar": false,
+                  "hide_legend": false,
+                  "save_image": false,
+                  "withdateranges": true,
+                  "studies": [
+                    "Volume@tv-basicstudies"
+                  ],
+                  "container_id": "tradingview_chart"
+                }});
+              </script>
+            </div>
+            """
+
+            components.html(tradingview_html, height=840)
+
+            if not market_df.empty:
+                st.markdown("### Raw Data")
+                st.dataframe(market_df.tail(100), use_container_width=True, height=220)
