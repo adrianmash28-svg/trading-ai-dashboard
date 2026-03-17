@@ -687,7 +687,6 @@ elif page == "MashGPT":
             st.markdown("### Raw Data")
             st.dataframe(market_df.tail(100), use_container_width=True, height=220)
 
-
     elif page == "Live Market":
         st.subheader("Live Market")
 
@@ -724,7 +723,6 @@ elif page == "MashGPT":
                 "Timeframe",
                 ["1", "5", "15", "30", "60", "D", "W"],
                 index=4,
-                help="1=1m, 5=5m, 15=15m, 30=30m, 60=1h, D=1 day, W=1 week",
             )
 
             market_df = fetch_history(
@@ -754,57 +752,6 @@ elif page == "MashGPT":
             else:
                 st.warning(f"No data found for {selected_symbol}")
 
-            st.markdown("### Quick Picks")
-            q1, q2 = st.columns(2)
-            if q1.button("NVDA", use_container_width=True):
-                st.session_state["live_market_symbol"] = "NVDA"
-                st.rerun()
-            if q2.button("AAPL", use_container_width=True):
-                st.session_state["live_market_symbol"] = "AAPL"
-                st.rerun()
-
-            q3, q4 = st.columns(2)
-            if q3.button("TSLA", use_container_width=True):
-                st.session_state["live_market_symbol"] = "TSLA"
-                st.rerun()
-            if q4.button("SPY", use_container_width=True):
-                st.session_state["live_market_symbol"] = "SPY"
-                st.rerun()
-
         with right:
             st.markdown(f"### {selected_symbol} Chart")
-
-            tradingview_html = f"""
-            <div class="tradingview-widget-container" style="height:820px;width:100%">
-              <div id="tradingview_chart"></div>
-              <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
-              <script type="text/javascript">
-                new TradingView.widget({{
-                  "autosize": true,
-                  "symbol": "{selected_symbol}",
-                  "interval": "{timeframe}",
-                  "timezone": "America/New_York",
-                  "theme": "dark",
-                  "style": "1",
-                  "locale": "en",
-                  "toolbar_bg": "#0b1220",
-                  "enable_publishing": false,
-                  "allow_symbol_change": true,
-                  "hide_top_toolbar": false,
-                  "hide_legend": false,
-                  "save_image": false,
-                  "withdateranges": true,
-                  "studies": [
-                    "Volume@tv-basicstudies"
-                  ],
-                  "container_id": "tradingview_chart"
-                }});
-              </script>
-            </div>
-            """
-
-            components.html(tradingview_html, height=840)
-
-            if not market_df.empty:
-                st.markdown("### Raw Data")
-                st.dataframe(market_df.tail(100), use_container_width=True, height=220)
+            st.write("Chart goes here for now.")
