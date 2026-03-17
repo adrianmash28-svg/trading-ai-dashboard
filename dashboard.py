@@ -181,13 +181,21 @@ apply_theme_css(settings["theme_mode"])
 # =========================
 def get_openai_client():
     def get_openai_client():
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key or OpenAI is None:
-        return None
-    try:
-        return OpenAI(api_key=api_key)
-    except Exception:
-        return None
+        import os
+        from openai import OpenAI
+
+        api_key = os.getenv("OPENAI_API_KEY")
+
+        if not api_key:
+            return None
+
+        try:
+            return OpenAI(api_key=api_key)
+        except Exception:
+            return None
+
+
+client = get_openai_client()
 
 
 client = get_openai_client()
