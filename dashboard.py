@@ -1,3 +1,4 @@
+
 import os
 import json
 from datetime import datetime
@@ -12,6 +13,9 @@ from streamlit_autorefresh import st_autorefresh
 
 try:
     from openai import OpenAI
+
+    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
 except Exception:
     OpenAI = None
 
@@ -176,6 +180,7 @@ apply_theme_css(settings["theme_mode"])
 # OPENAI
 # =========================
 def get_openai_client():
+    def get_openai_client():
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key or OpenAI is None:
         return None
@@ -404,7 +409,7 @@ def short_score_row(row, market_day_change_pct):
 def scan_live_signals(symbols):
     spy_raw = download_data(MARKET_SYMBOL, period=LIVE_DATA_PERIOD, interval=LIVE_DATA_INTERVAL)
     if spy_raw.empty:
-        return pd.DataFrame()
+        fpd.DataFrame()
 
     spy = prepare_indicators(spy_raw)
     market_day_map = build_market_day_map(spy)
@@ -911,23 +916,32 @@ elif page == settings["bot_name"]:
             st.write(msg["content"])
 
     prompt = st.chat_input(f"Ask {settings['bot_name']} anything")
-    if prompt:
-        st.session_state.bot_messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user", avatar="🙂"):
-            st.write(prompt)
+  if prompt:
+    with st.chat_message("user", avatar="🙂"):
+        st.write(prompt)
 
-        command_response, changed = process_bot_command(prompt, settings)
-        if changed:
-            answer = command_response
-        else:
-            answer = ai_answer(prompt, signals, paper, summary, trades)
+    with st.chat_message("assistant", avatar="🤖"):
+        st.write("Thinking...")
 
-        st.session_state.bot_messages.append({"role": "assistant", "content": answer})
-        with st.chat_message("assistant", avatar="🤖"):
-            st.write(answer)
+        try:
+            from openai import OpenAI
+            import os
 
-        if changed:
-            st.rerun()
+            client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+            response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": "You are MashGPT, a smart trading assistant that helps with stocks, trading strategies, and general questions."},
+                    {"role": "user", "content": prompt}
+                ]
+            )
+
+            reply = response.choices[0].message.content
+            st.write(reply)
+
+        except Exception as e:
+            st.error(f"Error: {e}")
 
     st.markdown("</div>", unsafe_allow_html=True)
 
