@@ -687,8 +687,9 @@ elif page == "MashGPT":
             st.markdown("### Raw Data")
             st.dataframe(market_df.tail(100), use_container_width=True, height=220)
 
-    elif page == "Live Market":
-        st.subheader("Live Market")
+    
+elif page == "Live Market":
+    st.subheader("Live Market")
 
     if "live_market_symbol" not in st.session_state:
         st.session_state["live_market_symbol"] = "NVDA"
