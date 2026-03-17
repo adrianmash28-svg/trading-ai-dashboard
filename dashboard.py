@@ -688,70 +688,70 @@ elif page == "MashGPT":
             st.dataframe(market_df.tail(100), use_container_width=True, height=220)
 
   elif page == "Live Market":
-        st.subheader("Live Market")
+    st.subheader("Live Market")
 
-        if "live_market_symbol" not in st.session_state:
-            st.session_state["live_market_symbol"] = "NVDA"
+    if "live_market_symbol" not in st.session_state:
+        st.session_state["live_market_symbol"] = "NVDA"
 
-                    watchlist = ["AAPL", "NVDA", "META", "MSFT", "TSLA", "AMZN", "SPY", "QQQ"]
+    watchlist = ["AAPL", "NVDA", "META", "MSFT", "TSLA", "AMZN", "SPY", "QQQ"]
 
-                    left, right = st.columns([1, 2.8], gap="large")
+    left, right = st.columns([1, 2.8], gap="large")
 
-                    with left:
-                        st.markdown("### Watchlist")
+    with left:
+        st.markdown("### Watchlist")
 
-                        default_symbol = st.session_state.get("live_market_symbol", "NVDA")
-                        default_index = watchlist.index(default_symbol) if default_symbol in watchlist else 0
+        default_symbol = st.session_state.get("live_market_symbol", "NVDA")
+        default_index = watchlist.index(default_symbol) if default_symbol in watchlist else 0
 
-                        selected_symbol = st.selectbox(
-                            "Select Symbol",
-                            options=watchlist,
-                            index=default_index,
-                        )
+        selected_symbol = st.selectbox(
+            "Select Symbol",
+            options=watchlist,
+            index=default_index,
+        )
 
-                        custom_symbol = st.text_input(
-                            "Or search ticker",
-                            value=st.session_state.get("live_market_symbol", selected_symbol)
-                        ).upper().strip()
+        custom_symbol = st.text_input(
+            "Or search ticker",
+            value=st.session_state.get("live_market_symbol", selected_symbol)
+        ).upper().strip()
 
-                        if custom_symbol:
-                            selected_symbol = custom_symbol
+        if custom_symbol:
+            selected_symbol = custom_symbol
 
-                        st.session_state["live_market_symbol"] = selected_symbol
+        st.session_state["live_market_symbol"] = selected_symbol
 
-                        timeframe = st.selectbox(
-                            "Timeframe",
-                            ["1", "5", "15", "30", "60", "D", "W"],
-                            index=4,
-                        )
+        timeframe = st.selectbox(
+            "Timeframe",
+            ["1", "5", "15", "30", "60", "D", "W"],
+            index=4,
+        )
 
-                        market_df = fetch_history(
-                            selected_symbol,
-                            period="6mo" if timeframe in ["D", "W"] else "5d",
-                            interval="1d" if timeframe in ["D", "W"] else "15m",
-                        )
+        market_df = fetch_history(
+            selected_symbol,
+            period="6mo" if timeframe in ["D", "W"] else "5d",
+            interval="1d" if timeframe in ["D", "W"] else "15m",
+        )
 
-                        if not market_df.empty:
-                            latest_close = float(market_df["Close"].iloc[-1])
-                            first_close = float(market_df["Close"].iloc[0])
-                            change_pct = ((latest_close - first_close) / first_close) * 100 if first_close != 0 else 0.0
-                            latest_volume = int(market_df["Volume"].iloc[-1])
-                            high_val = float(market_df["High"].max())
-                            low_val = float(market_df["Low"].min())
+        if not market_df.empty:
+            latest_close = float(market_df["Close"].iloc[-1])
+            first_close = float(market_df["Close"].iloc[0])
+            change_pct = ((latest_close - first_close) / first_close) * 100 if first_close != 0 else 0.0
+            latest_volume = int(market_df["Volume"].iloc[-1])
+            high_val = float(market_df["High"].max())
+            low_val = float(market_df["Low"].min())
 
-                            st.markdown("### Stats")
-                            s1, s2 = st.columns(2)
-                            s1.metric("Last", round(latest_close, 2))
-                            s2.metric("Change %", round(change_pct, 2))
+            st.markdown("### Stats")
+            s1, s2 = st.columns(2)
+            s1.metric("Last", round(latest_close, 2))
+            s2.metric("Change %", round(change_pct, 2))
 
-                            s3, s4 = st.columns(2)
-                            s3.metric("High", round(high_val, 2))
-                            s4.metric("Low", round(low_val, 2))
+            s3, s4 = st.columns(2)
+            s3.metric("High", round(high_val, 2))
+            s4.metric("Low", round(low_val, 2))
 
-                            st.metric("Volume", f"{latest_volume:,}")
-                        else:
-                            st.warning(f"No data found for {selected_symbol}")
+            st.metric("Volume", f"{latest_volume:,}")
+        else:
+            st.warning(f"No data found for {selected_symbol}")
 
-                    with right:
-                        st.markdown(f"### {selected_symbol} Chart")
-                        st.write("Chart goes here for now.")
+    with right:
+        st.markdown(f"### {selected_symbol} Chart")
+        st.write("Chart goes here for now.")
