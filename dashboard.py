@@ -624,7 +624,7 @@ elif page == "Live Market":
             <script type="text/javascript">
               new TradingView.widget({{
                 "width": "100%",
-                "height": 1300,
+                "height": 1000,
                 "symbol": "{selected_symbol}",
                 "interval": "{timeframe}",
                 "timezone": "America/Los_Angeles",
@@ -643,7 +643,7 @@ elif page == "Live Market":
             </script>
             """
         
-            components.html(tradingview_html, height=1320)
+            components.html(tradingview_html, height=1020)
         
             if not market_df.empty:
                 with st.expander("Show raw market data"):
