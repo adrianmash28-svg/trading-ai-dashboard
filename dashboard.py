@@ -7,6 +7,7 @@ import pandas as pd
 import requests
 import streamlit as st
 import yfinance as yf
+import streamlit.components.v1 as components
 
 try:
     from openai import OpenAI
@@ -566,83 +567,105 @@ elif page == "MashGPT":
             st.write(reply)
         
     
-
 elif page == "Live Market":
     st.subheader("Live Market")
 
-    c1, c2, c3 = st.columns([2, 1, 1])
+    watchlist = ["AAPL", "NVDA", "META", "MSFT", "TSLA", "AMZN", "SPY", "QQQ"]
 
-    with c1:
-        lookup_symbol = st.text_input("Search ticker", value="AAPL").upper().strip()
+    top1, top2 = st.columns([1, 3])
 
-    with c2:
-        period = st.selectbox(
-            "Time Range",
-            ["1d", "5d", "1mo", "3mo", "6mo", "1y", "2y", "5y"],
+    with top1:
+        st.markdown("### Watchlist")
+
+        selected_symbol = st.selectbox(
+            "Select Symbol",
+            options=watchlist,
+            index=0,
+        )
+
+        custom_symbol = st.text_input("Or search ticker", value=selected_symbol).upper().strip()
+        if custom_symbol:
+            selected_symbol = custom_symbol
+
+        timeframe = st.selectbox(
+            "Timeframe",
+            ["1", "5", "15", "60", "D", "W"],
             index=4,
+            help="TradingView interval: 1=1m, 5=5m, 15=15m, 60=1h, D=1 day, W=1 week",
         )
 
-    with c3:
-        interval_choices = {
-            "1d": ["1m", "5m", "15m"],
-            "5d": ["5m", "15m", "30m", "1h"],
-            "1mo": ["30m", "1h", "1d"],
-            "3mo": ["1h", "1d"],
-            "6mo": ["1d"],
-            "1y": ["1d"],
-            "2y": ["1d", "1wk"],
-            "5y": ["1d", "1wk", "1mo"],
-        }
-        interval = st.selectbox("Interval", interval_choices[period], index=0)
-
-    market_df = fetch_history(lookup_symbol, period=period, interval=interval)
-
-    if market_df.empty:
-        st.error(f"No data found for {lookup_symbol}.")
-    else:
-        latest_close = float(market_df["Close"].iloc[-1])
-        first_close = float(market_df["Close"].iloc[0])
-        change_pct = ((latest_close - first_close) / first_close) * 100 if first_close != 0 else 0.0
-        latest_volume = int(market_df["Volume"].iloc[-1])
-
-        k1, k2, k3 = st.columns(3)
-        k1.metric(f"{lookup_symbol} Last Price", round(latest_close, 2))
-        k2.metric("Period Change %", round(change_pct, 2))
-        k3.metric("Latest Volume", f"{latest_volume:,}")
-
-        st.subheader(f"{lookup_symbol} Candlestick Chart")
-
-        chart_df = market_df.copy()
-        chart_df.index.name = "Date"
-
-        mc = mpf.make_marketcolors(
-            up="#22c55e",
-            down="#ef4444",
-            edge="inherit",
-            wick="inherit",
-            volume="inherit",
-        )
-        style = mpf.make_mpf_style(
-            base_mpf_style="charles",
-            marketcolors=mc,
-            facecolor="#0f1115",
-            edgecolor="#2d333b",
-            figcolor="#0f1115",
-            gridcolor="#30363d",
-            gridstyle="--",
+        market_df = fetch_history(
+            selected_symbol,
+            period="6mo" if timeframe in ["D", "W"] else "5d",
+            interval="1d" if timeframe in ["D", "W"] else "15m",
         )
 
-        fig, _ = mpf.plot(
-            chart_df,
-            type="candle",
-            style=style,
-            volume=True,
-            figsize=(12, 7),
-            tight_layout=True,
-            returnfig=True,
-            warn_too_much_data=10000,
-        )
-        st.pyplot(fig)
+        if not market_df.empty:
+            latest_close = float(market_df["Close"].iloc[-1])
+            first_close = float(market_df["Close"].iloc[0])
+            change_pct = ((latest_close - first_close) / first_close) * 100 if first_close != 0 else 0.0
+            latest_volume = int(market_df["Volume"].iloc[-1])
 
-        with st.expander("Show raw market data"):
-            st.dataframe(chart_df.tail(200), use_container_width=True, height=320)
+            st.metric("Last Price", round(latest_close, 2))
+            st.metric("Period Change %", round(change_pct, 2))
+            st.metric("Latest Volume", f"{latest_volume:,}")
+
+            day_high = float(market_df["High"].max())
+            day_low = float(market_df["Low"].min())
+
+            c1, c2 = st.columns(2)
+            c1.metric("High", round(day_high, 2))
+            c2.metric("Low", round(day_low, 2))
+        else:
+            st.warning(f"No data found for {selected_symbol}")
+
+    with top2:
+        st.markdown(f"### {selected_symbol} Chart")
+
+        tradingview_html = f"""
+        <div class="tradingview-widget-container" style="height:700px;width:100%">
+          <div id="tradingview_chart"></div>
+          <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+          <script type="text/javascript">
+            new TradingView.widget({{
+              "autosize": true,
+              "symbol": "{selected_symbol}",
+              "interval": "{timeframe}",
+              "timezone": "America/New_York",
+              "theme": "dark",
+              "style": "1",
+              "locale": "en",
+              "toolbar_bg": "#0b1220",
+              "enable_publishing": false,
+              "allow_symbol_change": true,
+              "hide_top_toolbar": false,
+              "hide_legend": false,
+              "save_image": false,
+              "studies": [
+                "Volume@tv-basicstudies"
+              ],
+              "container_id": "tradingview_chart"
+            }});
+          </script>
+        </div>
+        """
+
+        components.html(tradingview_html, height=720)
+
+    st.markdown("---")
+
+    st.markdown("### Quick Symbol Buttons")
+    b1, b2, b3, b4, b5, b6 = st.columns(6)
+
+    if b1.button("AAPL"):
+        st.session_state["live_market_symbol"] = "AAPL"
+    if b2.button("NVDA"):
+        st.session_state["live_market_symbol"] = "NVDA"
+    if b3.button("META"):
+        st.session_state["live_market_symbol"] = "META"
+    if b4.button("MSFT"):
+        st.session_state["live_market_symbol"] = "MSFT"
+    if b5.button("TSLA"):
+        st.session_state["live_market_symbol"] = "TSLA"
+    if b6.button("SPY"):
+        st.session_state["live_market_symbol"] = "SPY"
