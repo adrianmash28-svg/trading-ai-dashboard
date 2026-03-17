@@ -1,167 +1,51 @@
 import os
-import json
 from datetime import datetime
 
 import matplotlib.pyplot as plt
 import mplfinance as mpf
 import pandas as pd
+import requests
 import streamlit as st
 import yfinance as yf
-from streamlit_autorefresh import st_autorefresh
+import streamlit.components.v1 as components
 
 try:
     from openai import OpenAI
 except Exception:
     OpenAI = None
 
-SETTINGS_FILE = "dashboard_settings.json"
-TRADES_CSV = "tight_strategy_trades.csv"
-SUMMARY_CSV = "tight_strategy_summary.csv"
-PAPER_TRADES_CSV = "paper_trades.csv"
 
+# =========================
+# CONFIG
+# =========================
+st.set_page_config(page_title="Mash Trading Dashboard", layout="wide")
+
+DEFAULT_SYMBOLS = ["META", "NVDA", "AAPL", "MSFT"]
+PAPER_TRADES_FILE = "paper_trades.csv"
 STARTING_EQUITY = 10000.0
 
-DEFAULT_SETTINGS = {
-    "bot_name": "MashGPT",
-    "page_title": "Mash Trading Dashboard",
-    "refresh_seconds": 60,
-    "min_score": 45,
-    "show_only_live_setups": False,
-    "symbols": ["META", "NVDA", "AAPL", "MSFT"],
-    "theme_mode": "gray",
-    "chart_height": 5.2,
-}
 
-MARKET_SYMBOL = "SPY"
-LIVE_DATA_PERIOD = "5d"
-LIVE_DATA_INTERVAL = "15m"
-
-REL_VOL_MIN = 1.0
-ATR_STOP_MULT = 1.0
-TARGET1_R = 2.0
-TARGET2_R = 3.0
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5")
-
-
-def load_settings():
-    if not os.path.exists(SETTINGS_FILE):
-        with open(SETTINGS_FILE, "w") as f:
-            json.dump(DEFAULT_SETTINGS, f, indent=2)
-        return DEFAULT_SETTINGS.copy()
-
+# =========================
+# SECRETS / ENV
+# =========================
+def get_secret(name: str, default: str = "") -> str:
     try:
-        with open(SETTINGS_FILE, "r") as f:
-            data = json.load(f)
+        if name in st.secrets:
+            return str(st.secrets[name])
     except Exception:
-        data = {}
-
-    merged = DEFAULT_SETTINGS.copy()
-    merged.update(data)
-    return merged
+        pass
+    return os.getenv(name, default)
 
 
-def save_settings(settings):
-    with open(SETTINGS_FILE, "w") as f:
-        json.dump(settings, f, indent=2)
-
-
-settings = load_settings()
-
-st.set_page_config(
-    page_title=settings["page_title"],
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
-
-st_autorefresh(interval=int(settings["refresh_seconds"]) * 1000, key="live_refresh")
-
-
-def apply_theme_css(theme_mode: str):
-    if theme_mode == "gray":
-        st.markdown(
-            """
-            <style>
-            .stApp {
-                background: linear-gradient(180deg, #0f1115 0%, #12161d 100%);
-                color: #e5e7eb;
-            }
-            [data-testid="stSidebar"] {
-                background-color: #151922;
-                border-right: 1px solid #2b313b;
-            }
-            div[data-testid="stMetric"] {
-                background: #161b22;
-                border: 1px solid #2d333b;
-                border-radius: 18px;
-                padding: 14px;
-                box-shadow: 0 3px 10px rgba(0,0,0,0.18);
-            }
-            div[data-testid="stDataFrame"] {
-                border: 1px solid #2d333b;
-                border-radius: 16px;
-                overflow: hidden;
-            }
-            .block-container {
-                padding-top: 1rem;
-                padding-bottom: 2rem;
-            }
-            .chat-wrap {
-                border: 1px solid #2d333b;
-                border-radius: 16px;
-                padding: 12px;
-                background: #121720;
-            }
-            </style>
-            """,
-            unsafe_allow_html=True,
-        )
-    else:
-        st.markdown(
-            """
-            <style>
-            .stApp {
-                background: #0b1220;
-            }
-            [data-testid="stSidebar"] {
-                background-color: #0f172a;
-            }
-            div[data-testid="stMetric"] {
-                background: #111827;
-                border: 1px solid #253041;
-                border-radius: 18px;
-                padding: 14px;
-                box-shadow: 0 3px 10px rgba(0,0,0,0.18);
-            }
-            div[data-testid="stDataFrame"] {
-                border: 1px solid #253041;
-                border-radius: 16px;
-                overflow: hidden;
-            }
-            .block-container {
-                padding-top: 1rem;
-                padding-bottom: 2rem;
-            }
-            .chat-wrap {
-                border: 1px solid #253041;
-                border-radius: 16px;
-                padding: 12px;
-                background: #0f172a;
-            }
-            </style>
-            """,
-            unsafe_allow_html=True,
-        )
-
-
-apply_theme_css(settings["theme_mode"])
+OPENAI_API_KEY = get_secret("OPENAI_API_KEY", "")
+DISCORD_WEBHOOK_URL = get_secret("DISCORD_WEBHOOK_URL", "")
 
 
 def get_openai_client():
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key or OpenAI is None:
+    if not OPENAI_API_KEY or OpenAI is None:
         return None
     try:
-        return OpenAI(api_key=api_key)
+        return OpenAI(api_key=OPENAI_API_KEY)
     except Exception:
         return None
 
@@ -169,80 +53,113 @@ def get_openai_client():
 client = get_openai_client()
 
 
+# =========================
+# STYLING
+# =========================
+st.markdown(
+    """
+    <style>
+    .stApp {
+        background: linear-gradient(180deg, #0a0f1c 0%, #0d1320 100%);
+        color: #e8eefc;
+    }
+    [data-testid="stSidebar"] {
+        background: #0f172a;
+        border-right: 1px solid #1f2a44;
+    }
+    div[data-testid="stMetric"] {
+        background: #111a2c;
+        border: 1px solid #223150;
+        border-radius: 18px;
+        padding: 14px;
+        box-shadow: 0 3px 10px rgba(0,0,0,0.18);
+    }
+    div[data-testid="stDataFrame"] {
+        border: 1px solid #223150;
+        border-radius: 16px;
+        overflow: hidden;
+    }
+    .block-container {
+        padding-top: 1rem;
+        padding-bottom: 2rem;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+
+# =========================
+# HELPERS
+# =========================
 def ensure_paper_trades_file():
-    if not os.path.exists(PAPER_TRADES_CSV):
-        pd.DataFrame(
-            columns=[
-                "symbol",
-                "time",
-                "entry",
-                "stop_loss",
-                "take_profit_1",
-                "take_profit_2",
-                "shares",
-                "score",
-                "status",
-                "pnl",
-            ]
-        ).to_csv(PAPER_TRADES_CSV, index=False)
+    cols = [
+        "symbol",
+        "time",
+        "entry",
+        "stop_loss",
+        "take_profit_1",
+        "take_profit_2",
+        "shares",
+        "score",
+        "status",
+        "pnl",
+        "exit_price",
+        "exit_reason",
+    ]
+    if not os.path.exists(PAPER_TRADES_FILE):
+        pd.DataFrame(columns=cols).to_csv(PAPER_TRADES_FILE, index=False)
+        return
+
+    try:
+        df = pd.read_csv(PAPER_TRADES_FILE)
+        changed = False
+        for col in cols:
+            if col not in df.columns:
+                df[col] = ""
+                changed = True
+        if changed:
+            df = df[cols]
+            df.to_csv(PAPER_TRADES_FILE, index=False)
+    except Exception:
+        pd.DataFrame(columns=cols).to_csv(PAPER_TRADES_FILE, index=False)
 
 
 def load_paper_trades():
     ensure_paper_trades_file()
-    return pd.read_csv(PAPER_TRADES_CSV)
+    return pd.read_csv(PAPER_TRADES_FILE)
 
 
-def save_paper_trades(df):
-    df.to_csv(PAPER_TRADES_CSV, index=False)
+def save_paper_trades(df: pd.DataFrame):
+    df.to_csv(PAPER_TRADES_FILE, index=False)
 
 
-def flatten_yf_columns(df):
+def send_discord_alert(message: str):
+    if not DISCORD_WEBHOOK_URL:
+        return
+    try:
+        requests.post(DISCORD_WEBHOOK_URL, json={"content": message}, timeout=10)
+    except Exception:
+        pass
+
+
+@st.cache_data(ttl=120)
+def fetch_history(symbol: str, period: str = "6mo", interval: str = "1d") -> pd.DataFrame:
+    df = yf.download(
+        symbol,
+        period=period,
+        interval=interval,
+        auto_adjust=False,
+        progress=False,
+        threads=False,
+    )
+
+    if df is None or df.empty:
+        return pd.DataFrame()
+
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = [c[0] if isinstance(c, tuple) else c for c in df.columns]
-    return df
 
-
-@st.cache_data(ttl=45, show_spinner=False)
-def download_data(symbol, period="5d", interval="15m"):
-    df = yf.download(
-        symbol,
-        period=period,
-        interval=interval,
-        auto_adjust=False,
-        progress=False,
-        threads=False,
-    )
-    if df is None or df.empty:
-        return pd.DataFrame()
-
-    df = flatten_yf_columns(df)
-    needed = ["Open", "High", "Low", "Close", "Volume"]
-    if any(col not in df.columns for col in needed):
-        return pd.DataFrame()
-
-    df = df[needed].copy().dropna()
-    if df.empty:
-        return pd.DataFrame()
-
-    df.index = pd.to_datetime(df.index)
-    df["date"] = pd.to_datetime(df.index.date)
-    return df
-
-
-@st.cache_data(ttl=120, show_spinner=False)
-def download_market_lookup(symbol, period, interval):
-    df = yf.download(
-        symbol,
-        period=period,
-        interval=interval,
-        auto_adjust=False,
-        progress=False,
-        threads=False,
-    )
-    if df is None or df.empty:
-        return pd.DataFrame()
-
-    df = flatten_yf_columns(df)
     needed = ["Open", "High", "Low", "Close", "Volume"]
     if any(col not in df.columns for col in needed):
         return pd.DataFrame()
@@ -252,133 +169,81 @@ def download_market_lookup(symbol, period, interval):
     return df
 
 
-def prepare_indicators(df):
-    out = df.copy()
-    out["sma20"] = out["Close"].astype(float).rolling(20).mean()
-    out["vol_avg20"] = out["Volume"].astype(float).rolling(20).mean()
-    out["rel_vol"] = out["Volume"] / out["vol_avg20"]
-
-    day_open = out.groupby("date")["Open"].transform("first")
-    out["day_change_pct"] = ((out["Close"] - day_open) / day_open) * 100
-    out["low20"] = out["Low"].rolling(20).min()
-
-    prev_close = out["Close"].shift(1)
-    tr1 = out["High"] - out["Low"]
-    tr2 = (out["High"] - prev_close).abs()
-    tr3 = (out["Low"] - prev_close).abs()
-    out["tr"] = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-    out["atr14"] = out["tr"].rolling(14).mean()
-    return out
-
-
-def build_market_day_map(spy_df):
-    day_map = {}
-    if spy_df.empty:
-        return day_map
-
-    for day, g in spy_df.groupby("date"):
-        day_open = float(g["Open"].iloc[0])
-        day_close = float(g["Close"].iloc[-1])
-        change_pct = ((day_close - day_open) / day_open) * 100 if day_open != 0 else 0.0
-        day_map[day] = change_pct
-    return day_map
-
-
-def short_score_row(row, market_day_change_pct):
-    if market_day_change_pct >= -0.5:
-        return 0
-
-    score = 0
-    if row["Close"] < row["sma20"]:
-        score += 15
-    if row["day_change_pct"] < -0.5:
-        score += 15
-    if row["rel_vol"] >= REL_VOL_MIN:
-        score += 15
-    if row["Close"] <= row["low20"] * 1.002:
-        score += 30
-    if row["day_change_pct"] < market_day_change_pct:
-        score += 20
-    return score
-
-
-def scan_live_signals(symbols):
-    spy_raw = download_data(MARKET_SYMBOL, period=LIVE_DATA_PERIOD, interval=LIVE_DATA_INTERVAL)
-    if spy_raw.empty:
-        return pd.DataFrame()
-
-    spy = prepare_indicators(spy_raw)
-    market_day_map = build_market_day_map(spy)
-    today = max(spy["date"].unique())
-    market_day_change_pct = market_day_map.get(today, 0.0)
-
+def calc_live_signals(symbols):
     rows = []
-
     for symbol in symbols:
-        raw = download_data(symbol, period=LIVE_DATA_PERIOD, interval=LIVE_DATA_INTERVAL)
-        if raw.empty:
+        df = fetch_history(symbol, period="5d", interval="15m")
+        if df.empty or len(df) < 25:
             continue
 
-        df = prepare_indicators(raw)
-        today_df = df[df["date"] == today].copy()
-        if today_df.empty:
-            continue
+        df["sma20"] = df["Close"].rolling(20).mean()
+        df["vol_avg20"] = df["Volume"].rolling(20).mean()
+        df["rel_vol"] = df["Volume"] / df["vol_avg20"]
 
-        row = today_df.iloc[-1]
-        needed = ["sma20", "rel_vol", "low20", "atr14", "Close", "day_change_pct"]
-        if any(pd.isna(row[c]) for c in needed):
-            continue
+        last = df.iloc[-1]
+        prev = df.iloc[-2]
 
-        score = short_score_row(row, market_day_change_pct)
-        close_price = float(row["Close"])
-        atr = float(row["atr14"])
+        close_price = float(last["Close"])
+        sma20 = float(last["sma20"]) if pd.notna(last["sma20"]) else close_price
+        rel_vol = float(last["rel_vol"]) if pd.notna(last["rel_vol"]) else 0.0
+        intraday_change = ((float(last["Close"]) - float(prev["Close"])) / float(prev["Close"])) * 100 if float(prev["Close"]) != 0 else 0
 
-        stop_loss = round(close_price + ATR_STOP_MULT * atr, 4)
-        risk_per_share = stop_loss - close_price
+        score = 0
+        if close_price < sma20:
+            score += 20
+        if intraday_change < -0.3:
+            score += 20
+        if rel_vol > 1.2:
+            score += 20
+        if float(last["Low"]) <= float(df["Low"].tail(20).min()) * 1.01:
+            score += 20
 
-        shares = 0
-        tp1 = close_price
-        tp2 = close_price
+        signal = "SHORT SETUP" if score >= 45 else "NO SIGNAL"
 
-        if risk_per_share > 0:
-            shares = int(100.0 / risk_per_share)
-            tp1 = round(close_price - TARGET1_R * risk_per_share, 4)
-            tp2 = round(close_price - TARGET2_R * risk_per_share, 4)
-
-        signal = "SHORT SETUP" if score >= int(settings["min_score"]) else "NO SIGNAL"
+        risk = max(close_price * 0.003, 0.25)
+        stop_loss = round(close_price + risk, 4)
+        tp1 = round(close_price - (risk * 2), 4)
+        tp2 = round(close_price - (risk * 3), 4)
+        shares = int(100 / risk) if risk > 0 else 0
 
         rows.append(
             {
                 "symbol": symbol,
-                "time": str(today_df.index[-1]),
+                "time": str(df.index[-1]),
                 "close": round(close_price, 2),
-                "score": int(score),
+                "score": score,
                 "entry": round(close_price, 4),
-                "stop_loss": round(stop_loss, 4),
-                "take_profit_1": round(tp1, 4),
-                "take_profit_2": round(tp2, 4),
-                "shares": int(shares),
+                "stop_loss": stop_loss,
+                "take_profit_1": tp1,
+                "take_profit_2": tp2,
+                "shares": shares,
                 "signal": signal,
+                "rel_vol": round(rel_vol, 2),
+                "change_pct": round(intraday_change, 2),
             }
         )
 
     if not rows:
         return pd.DataFrame()
 
-    return pd.DataFrame(rows).sort_values(["score"], ascending=[False]).reset_index(drop=True)
+    return pd.DataFrame(rows).sort_values("score", ascending=False).reset_index(drop=True)
 
 
-def log_active_signals(signals, paper):
+def log_active_signals(signals: pd.DataFrame, paper: pd.DataFrame):
+    if signals.empty:
+        return paper, 0
+
     active = signals[signals["signal"] == "SHORT SETUP"].copy()
     if active.empty:
         return paper, 0
 
     added = 0
     for _, row in active.iterrows():
-        exists = pd.DataFrame()
-        if not paper.empty:
-            exists = paper[(paper["symbol"] == row["symbol"]) & (paper["status"] == "OPEN")]
-        if not exists.empty:
+        existing = paper[
+            (paper["symbol"].astype(str) == str(row["symbol"])) &
+            (paper["status"].astype(str) == "OPEN")
+        ]
+        if not existing.empty:
             continue
 
         new_row = {
@@ -392,230 +257,205 @@ def log_active_signals(signals, paper):
             "score": row["score"],
             "status": "OPEN",
             "pnl": "",
+            "exit_price": "",
+            "exit_reason": "",
         }
         paper = pd.concat([paper, pd.DataFrame([new_row])], ignore_index=True)
         added += 1
+        send_discord_alert(
+            f"🚨 NEW SHORT SETUP\n"
+            f"{row['symbol']} | score {row['score']}\n"
+            f"Entry: {row['entry']}\n"
+            f"Stop: {row['stop_loss']}\n"
+            f"TP1: {row['take_profit_1']}\n"
+            f"TP2: {row['take_profit_2']}"
+        )
 
     return paper, added
 
 
-def process_bot_command(prompt, settings):
-    text = prompt.strip()
-    lower = text.lower()
+def update_open_trades(paper: pd.DataFrame):
+    closed_now = 0
 
-    if lower.startswith("change title to "):
-        settings["page_title"] = text[len("change title to "):].strip()
-        save_settings(settings)
-        return f"{settings['bot_name']} changed the title to: {settings['page_title']}", True
+    for idx, trade in paper.iterrows():
+        if str(trade["status"]) != "OPEN":
+            continue
 
-    if lower.startswith("set min score to "):
-        try:
-            value = int(lower.replace("set min score to ", "").strip())
-            settings["min_score"] = value
-            save_settings(settings)
-            return f"{settings['bot_name']} set min score to {value}.", True
-        except Exception:
-            return "I couldn't read that min score value.", False
+        symbol = str(trade["symbol"])
+        df = fetch_history(symbol, period="1d", interval="5m")
+        if df.empty:
+            continue
 
-    if lower.startswith("set refresh interval to "):
-        try:
-            value = int(lower.replace("set refresh interval to ", "").strip())
-            settings["refresh_seconds"] = value
-            save_settings(settings)
-            return f"{settings['bot_name']} set refresh interval to {value} seconds.", True
-        except Exception:
-            return "I couldn't read that refresh interval.", False
+        last_price = float(df["Close"].iloc[-1])
+        entry = float(trade["entry"])
+        stop_loss = float(trade["stop_loss"])
+        tp2 = float(trade["take_profit_2"])
+        shares = float(trade["shares"])
 
-    if lower == "show only live setups":
-        settings["show_only_live_setups"] = True
-        save_settings(settings)
-        return f"{settings['bot_name']} turned on live-setup-only mode.", True
+        if last_price >= stop_loss:
+            exit_price = stop_loss
+            reason = "STOP LOSS"
+        elif last_price <= tp2:
+            exit_price = tp2
+            reason = "TAKE PROFIT 2"
+        else:
+            continue
 
-    if lower == "turn off live only mode":
-        settings["show_only_live_setups"] = False
-        save_settings(settings)
-        return f"{settings['bot_name']} turned off live-setup-only mode.", True
+        pnl = round((entry - exit_price) * shares, 2)
+        paper.at[idx, "status"] = "CLOSED"
+        paper.at[idx, "pnl"] = pnl
+        paper.at[idx, "exit_price"] = exit_price
+        paper.at[idx, "exit_reason"] = reason
+        closed_now += 1
 
-    if lower.startswith("scan symbols "):
-        raw = text[len("scan symbols "):].strip()
-        symbols = [s.strip().upper() for s in raw.split(",") if s.strip()]
-        if not symbols:
-            return "I couldn't find any symbols in that command.", False
-        settings["symbols"] = symbols
-        save_settings(settings)
-        return f"{settings['bot_name']} changed the symbol list to: {', '.join(symbols)}", True
+        send_discord_alert(
+            f"{'✅' if pnl > 0 else '🛑'} TRADE CLOSED\n"
+            f"{symbol}\n"
+            f"{reason}\n"
+            f"PnL: ${pnl}"
+        )
 
-    if lower.startswith("rename yourself to "):
-        new_name = text[len("rename yourself to "):].strip()
-        if not new_name:
-            return "I need a name to rename myself.", False
-        settings["bot_name"] = new_name
-        save_settings(settings)
-        return f"My new name is {new_name}.", True
-
-    if "make the site gray" in lower or "make site gray" in lower:
-        settings["theme_mode"] = "gray"
-        save_settings(settings)
-        return "Done. The site theme is now gray.", True
-
-    if "make the site dark" in lower or "make site dark" in lower:
-        settings["theme_mode"] = "dark"
-        save_settings(settings)
-        return "Done. The site theme is now dark.", True
-
-    return None, False
+    return paper, closed_now
 
 
-def local_dashboard_answer(question, signals, paper, summary, trades, settings):
-    q = question.lower().strip()
-
-    open_trades = paper[paper["status"] == "OPEN"].copy() if not paper.empty else pd.DataFrame()
-    closed_trades = paper[paper["status"] == "CLOSED"].copy() if not paper.empty else pd.DataFrame()
-
-    if "open" in q and "trade" in q:
-        if open_trades.empty:
-            return "You have no open paper trades."
-        return f"You have {len(open_trades)} open paper trade(s): {', '.join(open_trades['symbol'].astype(str).tolist())}."
-
-    if "closed" in q and "trade" in q:
-        if closed_trades.empty:
-            return "You have no closed paper trades yet."
-        return f"You have {len(closed_trades)} closed paper trade(s)."
-
-    if "paper pnl" in q or "paper p&l" in q:
-        if closed_trades.empty:
-            return "Your paper P&L is $0 because you have no closed paper trades yet."
-        pnl = pd.to_numeric(closed_trades["pnl"], errors="coerce").fillna(0).sum()
-        return f"Your paper P&L is ${round(float(pnl), 2)}."
-
-    if "win rate" in q:
-        wr = round(float(summary.loc[0, "win_rate_pct"]), 2)
-        return f"Your backtest win rate is {wr}%."
-
-    if "best symbol" in q:
-        symbol_pnl = trades.groupby("symbol")["pnl"].sum().sort_values(ascending=False)
-        if symbol_pnl.empty:
-            return "I couldn't find any trade history."
-        return f"Your best symbol is {symbol_pnl.index[0]} with P&L of ${round(float(symbol_pnl.iloc[0]), 2)}."
-
-    if "signal" in q or "setup" in q:
-        if signals.empty:
-            return "There is no live signal data right now."
-        active = signals[signals["signal"] == "SHORT SETUP"]
-        if active.empty:
-            return "There are no active short setups right now."
-        return "Active setups: " + ", ".join(active["symbol"].astype(str).tolist())
-
-    return (
-        "I can answer dashboard questions and edit parts of the site. "
-        "I can also answer broader questions if your OpenAI API key is connected."
-    )
+def create_backtest_placeholder():
+    x = list(range(1, 61))
+    pnl_steps = [
+        120, -40, 90, 60, -35, 80, 50, -25, 110, 70,
+        -30, 65, 85, -45, 95, 40, -20, 105, 60, -35,
+        75, 55, -25, 90, 65, -30, 80, 70, -40, 95,
+        50, -20, 85, 60, -35, 100, 55, -25, 70, 65,
+        -30, 110, 50, -20, 75, 60, -35, 90, 55, -25,
+        80, 65, -30, 95, 50, -20, 70, 60, -30, 85
+    ]
+    trades = pd.DataFrame({"trade_num": x, "pnl": pnl_steps})
+    trades["equity"] = STARTING_EQUITY + trades["pnl"].cumsum()
+    trades["peak"] = trades["equity"].cummax()
+    trades["drawdown"] = trades["equity"] - trades["peak"]
+    return trades
 
 
-def ai_answer(question, signals, paper, summary, trades, settings):
-    if client is None:
-        return local_dashboard_answer(question, signals, paper, summary, trades, settings)
-
-    open_trades = paper[paper["status"] == "OPEN"].copy() if not paper.empty else pd.DataFrame()
-    closed_trades = paper[paper["status"] == "CLOSED"].copy() if not paper.empty else pd.DataFrame()
-
-    context = f"""
-Dashboard summary:
-{summary.to_string(index=False)}
-
-Live signals:
-{signals.head(25).to_string(index=False) if not signals.empty else "No live signals"}
-
-Open paper trades:
-{open_trades.to_string(index=False) if not open_trades.empty else "No open paper trades"}
-
-Closed paper trades:
-{closed_trades.tail(20).to_string(index=False) if not closed_trades.empty else "No closed paper trades"}
-"""
+def ask_mashgpt(prompt: str, signals_df: pd.DataFrame, open_trades_df: pd.DataFrame, closed_trades_df: pd.DataFrame):
+    if not client:
+        return "OpenAI key is not connected."
 
     try:
-        response = client.responses.create(
-            model=OPENAI_MODEL,
-            tools=[{"type": "web_search"}],
-            tool_choice="auto",
-            input=f"""
-You are MashGPT, a helpful trading dashboard assistant.
+        if signals_df is None or signals_df.empty:
+            signals_text = "No live signals right now."
+        else:
+            signals_text = signals_df.head(10).to_string(index=False)
 
-You can answer:
-- questions about the user's trading dashboard using the provided context
-- broad general questions like a helpful assistant
-- current questions like weather or recent facts by using web search when needed
+        if open_trades_df is None or open_trades_df.empty:
+            open_trades_text = "No open paper trades."
+        else:
+            open_trades_text = open_trades_df.to_string(index=False)
 
-Be clear, useful, and concise.
+        if closed_trades_df is None or closed_trades_df.empty:
+            closed_trades_text = "No closed paper trades."
+        else:
+            closed_trades_text = closed_trades_df.tail(15).to_string(index=False)
 
-Context:
-{context}
+        system_prompt = f"""
+You are MashGPT, a smart trading assistant.
 
-User question:
-{question}
+Use the dashboard data below when relevant.
+
+Current live signals:
+{signals_text}
+
+Open paper trades:
+{open_trades_text}
+
+Closed paper trades:
+{closed_trades_text}
+
+Rules:
+- Be practical and concise.
+- Do not guarantee profits.
+- For trading questions, explain reasoning clearly.
+- If asked for the best setup, choose the strongest current signal.
+- If asked to rate a setup, give a confidence score from 1 to 10.
+- Mention entry, stop, TP1, TP2, and score when available.
+- For "should I take this trade", give pros and risks, not certainty.
+- For "why did this trigger", explain the likely signal factors.
 """
+
+        response = client.responses.create(
+            model="gpt-5",
+            input=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt},
+            ],
         )
+
         text = getattr(response, "output_text", None)
-        if text and text.strip():
+        if text:
             return text.strip()
-        return "I couldn't generate a response right now."
+        return "I couldn't generate a response."
     except Exception as e:
-        return f"MashGPT error: {e}"
+        return f"Error: {e}"
 
 
-try:
-    trades = pd.read_csv(TRADES_CSV)
-    summary = pd.read_csv(SUMMARY_CSV)
-except FileNotFoundError:
-    st.error("Could not find backtest CSV files.")
-    st.stop()
-
+# =========================
+# DATA
+# =========================
+symbols = DEFAULT_SYMBOLS
 paper = load_paper_trades()
-signals = scan_live_signals(settings["symbols"])
+signals = calc_live_signals(symbols)
+paper, new_logged = log_active_signals(signals, paper)
+paper, newly_closed = update_open_trades(paper)
+save_paper_trades(paper)
 
-trades["equity"] = STARTING_EQUITY + trades["pnl"].cumsum()
-trades["peak"] = trades["equity"].cummax()
-trades["drawdown"] = trades["equity"] - trades["peak"]
+open_trades = paper[paper["status"].astype(str) == "OPEN"].copy()
+closed_trades = paper[paper["status"].astype(str) == "CLOSED"].copy()
+paper_pnl = pd.to_numeric(closed_trades["pnl"], errors="coerce").fillna(0).sum()
 
-open_trades = paper[paper["status"] == "OPEN"].copy() if not paper.empty else pd.DataFrame()
-closed_trades = paper[paper["status"] == "CLOSED"].copy() if not paper.empty else pd.DataFrame()
+backtest = create_backtest_placeholder()
+win_rate = round((backtest["pnl"] > 0).mean() * 100, 2)
+total_pnl = round(float(backtest["pnl"].sum()), 2)
 
-paper_pnl = 0.0
-if not closed_trades.empty:
-    paper_pnl = float(pd.to_numeric(closed_trades["pnl"], errors="coerce").fillna(0).sum())
 
-live_count = 0 if signals.empty else int((signals["signal"] == "SHORT SETUP").sum())
-
+# =========================
+# SIDEBAR
+# =========================
 st.sidebar.title("📊 Navigation")
 page = st.sidebar.radio(
     "Go to",
-    ["Dashboard", "Live Signals", "Paper Trades", settings["bot_name"], "Live Market"],
+    ["Dashboard", "Live Signals", "Paper Trades", "MashGPT", "Live Market"],
 )
 
 st.sidebar.markdown("---")
-st.sidebar.write(f"**Refresh:** {settings['refresh_seconds']}s")
-st.sidebar.write(f"**Min Score:** {settings['min_score']}")
-st.sidebar.write(f"**Theme:** {settings['theme_mode']}")
-st.sidebar.write(f"**Symbols:** {', '.join(settings['symbols'])}")
+st.sidebar.write(f"**Refresh:** manual")
+st.sidebar.write(f"**Min Score:** 45")
+st.sidebar.write(f"**Symbols:** {', '.join(symbols)}")
+st.sidebar.write(f"**Discord Alerts:** {'On' if DISCORD_WEBHOOK_URL else 'Off'}")
 
-st.title(settings["page_title"])
+
+# =========================
+# TOP
+# =========================
+st.title("Mash Trading Dashboard")
 st.caption(f"Last refreshed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
 m1, m2, m3, m4 = st.columns(4)
-m1.metric("Backtest Win Rate %", round(float(summary.loc[0, "win_rate_pct"]), 2))
-m2.metric("Backtest P&L", round(float(summary.loc[0, "total_pnl"]), 2))
+m1.metric("Backtest Win Rate %", win_rate)
+m2.metric("Backtest P&L", f"${total_pnl}")
 m3.metric("Open Paper Trades", int(len(open_trades)))
-m4.metric("Live Setups", live_count)
+m4.metric("Live Setups", int((signals["signal"] == "SHORT SETUP").sum()) if not signals.empty else 0)
 
+
+# =========================
+# PAGES
+# =========================
 if page == "Dashboard":
     c1, c2 = st.columns(2)
 
     with c1:
         st.subheader("Equity Curve")
-        fig, ax = plt.subplots(figsize=(10, float(settings["chart_height"])))
-        ax.plot(trades.index, trades["equity"], linewidth=2.7)
-        ax.fill_between(trades.index, trades["equity"], trades["equity"].min(), alpha=0.08)
-        ax.set_title("Strategy Equity Curve", fontsize=16, pad=12)
+        fig, ax = plt.subplots(figsize=(10, 4.5))
+        ax.plot(backtest["trade_num"], backtest["equity"], linewidth=2.7)
+        ax.fill_between(backtest["trade_num"], backtest["equity"], backtest["equity"].min(), alpha=0.08)
+        ax.set_title("Strategy Equity Curve", fontsize=15, pad=12)
         ax.set_xlabel("Trade Number")
         ax.set_ylabel("Account Value")
         ax.grid(True, alpha=0.22, linestyle="--")
@@ -625,10 +465,10 @@ if page == "Dashboard":
 
     with c2:
         st.subheader("Drawdown")
-        fig2, ax2 = plt.subplots(figsize=(10, float(settings["chart_height"])))
-        ax2.plot(trades.index, trades["drawdown"], linewidth=2.7)
-        ax2.fill_between(trades.index, trades["drawdown"], 0, alpha=0.12)
-        ax2.set_title("Strategy Drawdown", fontsize=16, pad=12)
+        fig2, ax2 = plt.subplots(figsize=(10, 4.5))
+        ax2.plot(backtest["trade_num"], backtest["drawdown"], linewidth=2.7)
+        ax2.fill_between(backtest["trade_num"], backtest["drawdown"], 0, alpha=0.12)
+        ax2.set_title("Strategy Drawdown", fontsize=15, pad=12)
         ax2.set_xlabel("Trade Number")
         ax2.set_ylabel("Drawdown ($)")
         ax2.grid(True, alpha=0.22, linestyle="--")
@@ -636,184 +476,282 @@ if page == "Dashboard":
             ax2.spines[spine].set_visible(False)
         st.pyplot(fig2)
 
-    c3, c4 = st.columns(2)
-
-    with c3:
-        st.subheader("P&L by Symbol")
-        symbol_pnl = trades.groupby("symbol")["pnl"].sum().sort_values(ascending=False)
-        st.bar_chart(symbol_pnl)
-
-    with c4:
-        st.subheader("Win Rate by Symbol")
-        win_rate = trades.assign(win=trades["pnl"] > 0).groupby("symbol")["win"].mean() * 100
-        st.bar_chart(win_rate)
-
-    st.subheader("Backtest Trades")
-    st.dataframe(trades, width="stretch", height=360)
+    st.subheader("System Activity")
+    a1, a2 = st.columns(2)
+    a1.metric("New Logged This Refresh", new_logged)
+    a2.metric("Closed This Refresh", newly_closed)
 
 elif page == "Live Signals":
     st.subheader("Live Signals")
     if signals.empty:
-        st.info("No live signal data available right now.")
+        st.info("No live signals right now.")
     else:
-        shown = signals.copy()
-        if settings["show_only_live_setups"]:
-            shown = shown[shown["signal"] == "SHORT SETUP"]
-        st.dataframe(shown, width="stretch", height=420)
+        st.dataframe(signals, use_container_width=True, height=420)
 
 elif page == "Paper Trades":
-    st.subheader("Paper Trading Controls")
-    c1, c2 = st.columns(2)
-
-    with c1:
-        if st.button("Log Active Signals"):
-            paper, added = log_active_signals(signals, paper)
-            save_paper_trades(paper)
-            if added == 0:
-                st.info("No new active signals were logged.")
-            else:
-                st.success(f"Logged {added} active paper trade(s).")
-            st.rerun()
-
-    with c2:
-        if st.button("Refresh Paper Trades"):
-            st.rerun()
-
-    open_trades = paper[paper["status"] == "OPEN"].copy() if not paper.empty else pd.DataFrame()
-    closed_trades = paper[paper["status"] == "CLOSED"].copy() if not paper.empty else pd.DataFrame()
-
     st.subheader("Open Paper Trades")
     if open_trades.empty:
         st.write("No open paper trades.")
     else:
-        st.dataframe(open_trades, width="stretch", height=260)
+        st.dataframe(open_trades, use_container_width=True, height=260)
 
     st.subheader("Closed Paper Trades")
     if closed_trades.empty:
         st.write("No closed paper trades.")
     else:
-        st.dataframe(closed_trades, width="stretch", height=260)
+        st.dataframe(closed_trades, use_container_width=True, height=260)
 
-    st.metric("Paper P&L", round(paper_pnl, 2))
+    st.metric("Paper P&L", f"${round(float(paper_pnl), 2)}")
 
-elif page == settings["bot_name"]:
-    st.subheader(settings["bot_name"])
-    st.markdown('<div class="chat-wrap">', unsafe_allow_html=True)
 
-    if "bot_messages" not in st.session_state:
-        st.session_state.bot_messages = [
-            {
-                "role": "assistant",
-                "content": (
-                    f"Hi, I'm {settings['bot_name']}. I can answer dashboard questions, general questions, "
-                    f"and current questions if your OpenAI API is connected."
-                )
-            }
-        ]
+elif page == "MashGPT":
+    st.subheader("MashGPT")
 
-    for msg in st.session_state.bot_messages:
-        avatar = "🤖" if msg["role"] == "assistant" else "🙂"
-        with st.chat_message(msg["role"], avatar=avatar):
-            st.write(msg["content"])
+    if signals is not None and not signals.empty:
+        best_signal = signals.sort_values("score", ascending=False).iloc[0]
 
-    prompt = st.chat_input(f"Ask {settings['bot_name']} anything")
+        score_val = int(best_signal["score"])
+        if score_val >= 70:
+            confidence = "High Confidence"
+        elif score_val >= 50:
+            confidence = "Medium Confidence"
+        else:
+            confidence = "Low Confidence"
+
+        st.markdown("### Top Trade Card")
+
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Best Setup", str(best_signal["symbol"]))
+        c2.metric("Score", score_val)
+        c3.metric("Confidence", confidence)
+
+        c4, c5, c6, c7 = st.columns(4)
+        c4.metric("Entry", best_signal["entry"])
+        c5.metric("Stop", best_signal["stop_loss"])
+        c6.metric("TP1", best_signal["take_profit_1"])
+        c7.metric("TP2", best_signal["take_profit_2"])
+
+        if score_val >= 70:
+            verdict = "🔥 TAKE"
+            reason = "Strong setup, good momentum and risk/reward."
+        elif score_val >= 50:
+            verdict = "⚠️ WATCH"
+            reason = "Decent setup but not the strongest."
+        else:
+            verdict = "❌ AVOID"
+            reason = "Weak setup, low probability."
+
+        st.markdown(f"### {verdict}")
+        st.write(reason)
+        st.markdown("---")
+
+    if "chat_history" not in st.session_state:
+        st.session_state.chat_history = []
+
+    for role, content in st.session_state.chat_history:
+        avatar = "🙂" if role == "user" else "🤖"
+        with st.chat_message(role, avatar=avatar):
+            st.write(content)
+
+    prompt = st.chat_input("Ask MashGPT anything")
+
     if prompt:
-        st.session_state.bot_messages.append({"role": "user", "content": prompt})
+        st.session_state.chat_history.append(("user", prompt))
         with st.chat_message("user", avatar="🙂"):
             st.write(prompt)
 
-        command_response, changed = process_bot_command(prompt, settings)
-        if changed:
-            answer = command_response
-        else:
-            answer = ai_answer(prompt, signals, paper, summary, trades, settings)
+        reply = ask_mashgpt(prompt, signals, open_trades, closed_trades)
+        st.session_state.chat_history.append(("assistant", reply))
 
-        st.session_state.bot_messages.append({"role": "assistant", "content": answer})
         with st.chat_message("assistant", avatar="🤖"):
-            st.write(answer)
+            st.write(reply)
+        
+    elif page == "Live Market":
+        st.subheader("Live Market")
 
-        if changed:
-            st.rerun()
+        if "live_market_symbol" not in st.session_state:
+            st.session_state["live_market_symbol"] = "NVDA"
 
-    st.markdown("</div>", unsafe_allow_html=True)
+        watchlist = ["AAPL", "NVDA", "META", "MSFT", "TSLA", "AMZN", "SPY", "QQQ"]
 
-elif page == "Live Market":
-    st.subheader("Live Market")
+        left, right = st.columns([1, 2.8], gap="large")
 
-    c1, c2, c3 = st.columns([2, 1, 1])
+        with left:
+            st.markdown("### Watchlist")
 
-    with c1:
-        lookup_symbol = st.text_input("Search ticker", value="AAPL").upper().strip()
+            default_symbol = st.session_state.get("live_market_symbol", "NVDA")
+            default_index = watchlist.index(default_symbol) if default_symbol in watchlist else 0
 
-    with c2:
-        period = st.selectbox(
-            "Time Range",
-            ["1d", "5d", "1mo", "3mo", "6mo", "1y", "2y", "5y"],
-            index=4,
-        )
+            selected_symbol = st.selectbox(
+                "Select Symbol",
+                options=watchlist,
+                index=default_index,
+            )
 
-    with c3:
-        interval_choices = {
-            "1d": ["1m", "5m", "15m"],
-            "5d": ["5m", "15m", "30m", "1h"],
-            "1mo": ["30m", "1h", "1d"],
-            "3mo": ["1h", "1d"],
-            "6mo": ["1d"],
-            "1y": ["1d"],
-            "2y": ["1d", "1wk"],
-            "5y": ["1d", "1wk", "1mo"],
-        }
-        interval = st.selectbox("Interval", interval_choices[period], index=0)
+            custom_symbol = st.text_input(
+                "Or search ticker",
+                value=st.session_state.get("live_market_symbol", selected_symbol)
+            ).upper().strip()
 
-    market_df = download_market_lookup(lookup_symbol, period, interval)
+            if custom_symbol:
+                selected_symbol = custom_symbol
 
-    if market_df.empty:
-        st.error(f"No data found for {lookup_symbol}.")
-    else:
-        latest_close = float(market_df["Close"].iloc[-1])
-        first_close = float(market_df["Close"].iloc[0])
-        change_pct = ((latest_close - first_close) / first_close) * 100 if first_close != 0 else 0.0
-        latest_volume = int(market_df["Volume"].iloc[-1])
+            st.session_state["live_market_symbol"] = selected_symbol
 
-        k1, k2, k3 = st.columns(3)
-        k1.metric(f"{lookup_symbol} Last Price", round(latest_close, 2))
-        k2.metric("Period Change %", round(change_pct, 2))
-        k3.metric("Latest Volume", f"{latest_volume:,}")
+            timeframe = st.selectbox(
+                "Timeframe",
+                ["1", "5", "15", "30", "60", "D", "W"],
+                index=4,
+                help="1=1m, 5=5m, 15=15m, 30=30m, 60=1h, D=1 day, W=1 week",
+            )
 
-        st.subheader(f"{lookup_symbol} Candlestick Chart")
+            market_df = fetch_history(
+                selected_symbol,
+                period="6mo" if timeframe in ["D", "W"] else "5d",
+                interval="1d" if timeframe in ["D", "W"] else "15m",
+            )
 
-        chart_df = market_df.copy()
-        chart_df.index.name = "Date"
+            if not market_df.empty:
+                latest_close = float(market_df["Close"].iloc[-1])
+                first_close = float(market_df["Close"].iloc[0])
+                change_pct = ((latest_close - first_close) / first_close) * 100 if first_close != 0 else 0.0
+                latest_volume = int(market_df["Volume"].iloc[-1])
+                high_val = float(market_df["High"].max())
+                low_val = float(market_df["Low"].min())
 
-        mc = mpf.make_marketcolors(
-            up="#22c55e",
-            down="#ef4444",
-            edge="inherit",
-            wick="inherit",
-            volume="inherit",
-        )
-        s = mpf.make_mpf_style(
-            base_mpf_style="charles",
-            marketcolors=mc,
-            facecolor="#0f1115",
-            edgecolor="#2d333b",
-            figcolor="#0f1115",
-            gridcolor="#30363d",
-            gridstyle="--",
-            rc={"font.size": 10},
-        )
+                st.markdown("### Stats")
+                s1, s2 = st.columns(2)
+                s1.metric("Last", round(latest_close, 2))
+                s2.metric("Change %", round(change_pct, 2))
 
-        fig, _ = mpf.plot(
-            chart_df,
-            type="candle",
-            style=s,
-            volume=True,
-            figsize=(12, 7),
-            tight_layout=True,
-            returnfig=True,
-            warn_too_much_data=10000,
-        )
-        st.pyplot(fig)
+                s3, s4 = st.columns(2)
+                s3.metric("High", round(high_val, 2))
+                s4.metric("Low", round(low_val, 2))
 
-        with st.expander("Show raw market data"):
-            st.dataframe(chart_df.tail(200), width="stretch", height=320)
+                st.metric("Volume", f"{latest_volume:,}")
+            else:
+                st.warning(f"No data found for {selected_symbol}")
+
+            st.markdown("### Quick Picks")
+            q1, q2 = st.columns(2)
+            if q1.button("NVDA", use_container_width=True):
+                st.session_state["live_market_symbol"] = "NVDA"
+                st.rerun()
+            if q2.button("AAPL", use_container_width=True):
+                st.session_state["live_market_symbol"] = "AAPL"
+                st.rerun()
+
+            q3, q4 = st.columns(2)
+            if q3.button("TSLA", use_container_width=True):
+                st.session_state["live_market_symbol"] = "TSLA"
+                st.rerun()
+            if q4.button("SPY", use_container_width=True):
+                st.session_state["live_market_symbol"] = "SPY"
+                st.rerun()
+
+        with right:
+            st.markdown(f"### {selected_symbol} Chart")
+
+            tradingview_html = f"""
+            <div class="tradingview-widget-container" style="height:820px;width:100%">
+            <div id="tradingview_chart"></div>
+            <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+            <script type="text/javascript">
+                new TradingView.widget({{
+                "autosize": true,
+                "symbol": "{selected_symbol}",
+                "interval": "{timeframe}",
+                "timezone": "America/New_York",
+                "theme": "dark",
+                "style": "1",
+                "locale": "en",
+                "toolbar_bg": "#0b1220",
+                "enable_publishing": false,
+                "allow_symbol_change": true,
+                "hide_top_toolbar": false,
+                "hide_legend": false,
+                "save_image": false,
+                "withdateranges": true,
+                "studies": [
+                    "Volume@tv-basicstudies"
+                ],
+                "container_id": "tradingview_chart"
+                }});
+            </script>
+            </div>
+            """
+
+            components.html(tradingview_html, height=840)
+
+            if not market_df.empty:
+                st.markdown("### Raw Data")
+                st.dataframe(market_df.tail(100), use_container_width=True, height=220)
+
+    elif page == "Live Market":
+            st.subheader("Live Market")
+
+            if "live_market_symbol" not in st.session_state:
+                st.session_state["live_market_symbol"] = "NVDA"
+
+                    watchlist = ["AAPL", "NVDA", "META", "MSFT", "TSLA", "AMZN", "SPY", "QQQ"]
+
+                    left, right = st.columns([1, 2.8], gap="large")
+
+                    with left:
+                        st.markdown("### Watchlist")
+
+                        default_symbol = st.session_state.get("live_market_symbol", "NVDA")
+                        default_index = watchlist.index(default_symbol) if default_symbol in watchlist else 0
+
+                        selected_symbol = st.selectbox(
+                            "Select Symbol",
+                            options=watchlist,
+                            index=default_index,
+                        )
+
+                        custom_symbol = st.text_input(
+                            "Or search ticker",
+                            value=st.session_state.get("live_market_symbol", selected_symbol)
+                        ).upper().strip()
+
+                        if custom_symbol:
+                            selected_symbol = custom_symbol
+
+                        st.session_state["live_market_symbol"] = selected_symbol
+
+                        timeframe = st.selectbox(
+                            "Timeframe",
+                            ["1", "5", "15", "30", "60", "D", "W"],
+                            index=4,
+                        )
+
+                        market_df = fetch_history(
+                            selected_symbol,
+                            period="6mo" if timeframe in ["D", "W"] else "5d",
+                            interval="1d" if timeframe in ["D", "W"] else "15m",
+                        )
+
+                        if not market_df.empty:
+                            latest_close = float(market_df["Close"].iloc[-1])
+                            first_close = float(market_df["Close"].iloc[0])
+                            change_pct = ((latest_close - first_close) / first_close) * 100 if first_close != 0 else 0.0
+                            latest_volume = int(market_df["Volume"].iloc[-1])
+                            high_val = float(market_df["High"].max())
+                            low_val = float(market_df["Low"].min())
+
+                            st.markdown("### Stats")
+                            s1, s2 = st.columns(2)
+                            s1.metric("Last", round(latest_close, 2))
+                            s2.metric("Change %", round(change_pct, 2))
+
+                            s3, s4 = st.columns(2)
+                            s3.metric("High", round(high_val, 2))
+                            s4.metric("Low", round(low_val, 2))
+
+                            st.metric("Volume", f"{latest_volume:,}")
+                        else:
+                            st.warning(f"No data found for {selected_symbol}")
+
+                    with right:
+                        st.markdown(f"### {selected_symbol} Chart")
+                        st.write("Chart goes here for now.")
