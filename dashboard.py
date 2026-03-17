@@ -538,7 +538,7 @@ elif page == "Live Market":
 
     watchlist = ["AAPL", "NVDA", "META", "MSFT", "TSLA", "AMZN", "SPY", "QQQ"]
 
-    left, right = st.columns([1, 4.3], gap="large")
+    left, right = st.columns([1, 3], gap="large")
 
     with left:
         st.markdown("### Market Panel")
@@ -613,11 +613,15 @@ elif page == "Live Market":
         else:
             st.warning(f"No data found for {selected_symbol}")
 
-    with right:
-        st.markdown(f"### {selected_symbol} Chart")
+with right:
+    st.markdown(f"### {selected_symbol} Chart")
 
+    # center the chart and make it narrower + taller
+    c_left, c_mid, c_right = st.columns([1, 2.2, 1])
+
+    with c_mid:
         tradingview_html = f"""
-        <div class="tradingview-widget-container" style="height:980px;width:100%">
+        <div class="tradingview-widget-container" style="height:1200px;width:100%">
           <div id="tradingview_chart"></div>
           <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
           <script type="text/javascript">
@@ -642,8 +646,10 @@ elif page == "Live Market":
         </div>
         """
 
-        components.html(tradingview_html, height=1000)
+        components.html(tradingview_html, height=1200)
 
-        if not market_df.empty:
-            with st.expander("Show raw market data"):
-                st.dataframe(market_df.tail(100), width="stretch", height=220)
+    if not market_df.empty:
+        with st.expander("Show raw market data"):
+            st.dataframe(market_df.tail(100), width="stretch", height=220)
+
+        components.html(tradingview_html, height=1000)
