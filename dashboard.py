@@ -401,12 +401,12 @@ st.sidebar.write(f"**Discord Alerts:** {'On' if DISCORD_WEBHOOK_URL else 'Off'}"
 st.title("Mash Trading Dashboard")
 st.caption(f"Last refreshed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
-m1, m2, m3, m4 = st.columns(4)
-m1.metric("Backtest Win Rate %", win_rate)
-m2.metric("Backtest P&L", f"${total_pnl}")
-m3.metric("Open Paper Trades", int(len(open_trades)))
-m4.metric("Live Setups", int((signals["signal"] == "SHORT SETUP").sum()) if not signals.empty else 0)
-
+if page != "Live Market":
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Backtest Win Rate %", win_rate)
+    m2.metric("Backtest P&L", f"${total_pnl}")
+    m3.metric("Open Paper Trades", int(len(open_trades)))
+    m4.metric("Live Setups", int((signals["signal"] == "SHORT SETUP").sum()) if not signals.empty else 0)
 
 if page == "Dashboard":
     c1, c2 = st.columns(2)
@@ -531,29 +531,29 @@ elif page == "MashGPT":
             st.write(reply)
 
 elif page == "Live Market":
-    st.subheader("Live Market")
+    st.markdown("## Live Market")
 
     if "live_market_symbol" not in st.session_state:
         st.session_state["live_market_symbol"] = "NVDA"
 
     watchlist = ["AAPL", "NVDA", "META", "MSFT", "TSLA", "AMZN", "SPY", "QQQ"]
 
-    left, right = st.columns([1, 3.2], gap="large")
+    left, right = st.columns([1, 4.3], gap="large")
 
     with left:
-        st.markdown("### Watchlist")
+        st.markdown("### Market Panel")
 
         default_symbol = st.session_state.get("live_market_symbol", "NVDA")
         default_index = watchlist.index(default_symbol) if default_symbol in watchlist else 0
 
         selected_symbol = st.selectbox(
-            "Select Symbol",
+            "Ticker",
             options=watchlist,
             index=default_index,
         )
 
         custom_symbol = st.text_input(
-            "Or search ticker",
+            "Search ticker",
             value=default_symbol
         ).upper().strip()
 
@@ -574,27 +574,6 @@ elif page == "Live Market":
             interval="1d" if timeframe in ["D", "W"] else "15m",
         )
 
-        if not market_df.empty:
-            latest_close = float(market_df["Close"].iloc[-1])
-            first_close = float(market_df["Close"].iloc[0])
-            change_pct = ((latest_close - first_close) / first_close) * 100 if first_close != 0 else 0.0
-            latest_volume = int(market_df["Volume"].iloc[-1])
-            high_val = float(market_df["High"].max())
-            low_val = float(market_df["Low"].min())
-
-            st.markdown("### Stats")
-            s1, s2 = st.columns(2)
-            s1.metric("Last", round(latest_close, 2))
-            s2.metric("Change %", round(change_pct, 2))
-
-            s3, s4 = st.columns(2)
-            s3.metric("High", round(high_val, 2))
-            s4.metric("Low", round(low_val, 2))
-
-            st.metric("Volume", f"{latest_volume:,}")
-        else:
-            st.warning(f"No data found for {selected_symbol}")
-
         st.markdown("### Quick Picks")
         q1, q2 = st.columns(2)
         if q1.button("NVDA", use_container_width=True):
@@ -612,11 +591,33 @@ elif page == "Live Market":
             st.session_state["live_market_symbol"] = "SPY"
             st.rerun()
 
+        if not market_df.empty:
+            latest_close = float(market_df["Close"].iloc[-1])
+            first_close = float(market_df["Close"].iloc[0])
+            change_pct = ((latest_close - first_close) / first_close) * 100 if first_close != 0 else 0.0
+            latest_volume = int(market_df["Volume"].iloc[-1])
+            high_val = float(market_df["High"].max())
+            low_val = float(market_df["Low"].min())
+
+            st.markdown("### Stats")
+
+            s1, s2 = st.columns(2)
+            s1.metric("Last", round(latest_close, 2))
+            s2.metric("Change %", round(change_pct, 2))
+
+            s3, s4 = st.columns(2)
+            s3.metric("High", round(high_val, 2))
+            s4.metric("Low", round(low_val, 2))
+
+            st.metric("Volume", f"{latest_volume:,}")
+        else:
+            st.warning(f"No data found for {selected_symbol}")
+
     with right:
         st.markdown(f"### {selected_symbol} Chart")
 
         tradingview_html = f"""
-        <div class="tradingview-widget-container" style="height:820px;width:100%">
+        <div class="tradingview-widget-container" style="height:980px;width:100%">
           <div id="tradingview_chart"></div>
           <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
           <script type="text/javascript">
@@ -641,8 +642,8 @@ elif page == "Live Market":
         </div>
         """
 
-        components.html(tradingview_html, height=840)
+        components.html(tradingview_html, height=1000)
 
         if not market_df.empty:
-            st.markdown("### Raw Data")
-            st.dataframe(market_df.tail(100), width="stretch", height=220)
+            with st.expander("Show raw market data"):
+                st.dataframe(market_df.tail(100), width="stretch", height=220)
