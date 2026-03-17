@@ -502,8 +502,7 @@ elif page == "Paper Trades":
 
     st.metric("Paper P&L", f"${round(float(paper_pnl), 2)}")
 
-elif page == "MashGPT":
-    st.subheader("MashGPT")
+
 elif page == "MashGPT":
     st.subheader("MashGPT")
 
