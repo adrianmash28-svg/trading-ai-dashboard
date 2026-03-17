@@ -505,6 +505,32 @@ elif page == "Paper Trades":
 elif page == "MashGPT":
     st.subheader("MashGPT")
 
+        if signals is not None and not signals.empty:
+        best_signal = signals.sort_values("score", ascending=False).iloc[0]
+
+        score_val = int(best_signal["score"])
+        if score_val >= 70:
+            confidence = "High Confidence"
+        elif score_val >= 50:
+            confidence = "Medium Confidence"
+        else:
+            confidence = "Low Confidence"
+
+        st.markdown("### Top Trade Card")
+
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Best Setup", str(best_signal["symbol"]))
+        c2.metric("Score", score_val)
+        c3.metric("Confidence", confidence)
+
+        c4, c5, c6, c7 = st.columns(4)
+        c4.metric("Entry", best_signal["entry"])
+        c5.metric("Stop", best_signal["stop_loss"])
+        c6.metric("TP1", best_signal["take_profit_1"])
+        c7.metric("TP2", best_signal["take_profit_2"])
+
+        st.markdown("---")
+
     if "chat_history" not in st.session_state:
         st.session_state.chat_history = []
 
