@@ -1,13 +1,12 @@
 import os
 from datetime import datetime
 
-import matplotlib.pyplot as plt
-import mplfinance as mpf
 import pandas as pd
 import requests
 import streamlit as st
-import yfinance as yf
 import streamlit.components.v1 as components
+import yfinance as yf
+import matplotlib.pyplot as plt
 
 try:
     from openai import OpenAI
@@ -16,17 +15,13 @@ except Exception:
 
 
 # =========================
-# CONFIG
+# PAGE CONFIG
 # =========================
 st.set_page_config(page_title="Mash Trading Dashboard", layout="wide")
 
-DEFAULT_SYMBOLS = ["META", "NVDA", "AAPL", "MSFT"]
-PAPER_TRADES_FILE = "paper_trades.csv"
-STARTING_EQUITY = 10000.0
-
 
 # =========================
-# SECRETS / ENV
+# HELPERS
 # =========================
 def get_secret(name: str, default: str = "") -> str:
     try:
@@ -39,6 +34,10 @@ def get_secret(name: str, default: str = "") -> str:
 
 OPENAI_API_KEY = get_secret("OPENAI_API_KEY", "")
 DISCORD_WEBHOOK_URL = get_secret("DISCORD_WEBHOOK_URL", "")
+
+PAPER_TRADES_FILE = "paper_trades.csv"
+DEFAULT_SYMBOLS = ["META", "NVDA", "AAPL", "MSFT"]
+STARTING_EQUITY = 10000.0
 
 
 def get_openai_client():
@@ -53,45 +52,15 @@ def get_openai_client():
 client = get_openai_client()
 
 
-# =========================
-# STYLING
-# =========================
-st.markdown(
-    """
-    <style>
-    .stApp {
-        background: linear-gradient(180deg, #0a0f1c 0%, #0d1320 100%);
-        color: #e8eefc;
-    }
-    [data-testid="stSidebar"] {
-        background: #0f172a;
-        border-right: 1px solid #1f2a44;
-    }
-    div[data-testid="stMetric"] {
-        background: #111a2c;
-        border: 1px solid #223150;
-        border-radius: 18px;
-        padding: 14px;
-        box-shadow: 0 3px 10px rgba(0,0,0,0.18);
-    }
-    div[data-testid="stDataFrame"] {
-        border: 1px solid #223150;
-        border-radius: 16px;
-        overflow: hidden;
-    }
-    .block-container {
-        padding-top: 1rem;
-        padding-bottom: 2rem;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
+def send_discord_alert(message: str):
+    if not DISCORD_WEBHOOK_URL:
+        return
+    try:
+        requests.post(DISCORD_WEBHOOK_URL, json={"content": message}, timeout=10)
+    except Exception:
+        pass
 
 
-# =========================
-# HELPERS
-# =========================
 def ensure_paper_trades_file():
     cols = [
         "symbol",
@@ -134,15 +103,6 @@ def save_paper_trades(df: pd.DataFrame):
     df.to_csv(PAPER_TRADES_FILE, index=False)
 
 
-def send_discord_alert(message: str):
-    if not DISCORD_WEBHOOK_URL:
-        return
-    try:
-        requests.post(DISCORD_WEBHOOK_URL, json={"content": message}, timeout=10)
-    except Exception:
-        pass
-
-
 @st.cache_data(ttl=120)
 def fetch_history(symbol: str, period: str = "6mo", interval: str = "1d") -> pd.DataFrame:
     df = yf.download(
@@ -171,6 +131,7 @@ def fetch_history(symbol: str, period: str = "6mo", interval: str = "1d") -> pd.
 
 def calc_live_signals(symbols):
     rows = []
+
     for symbol in symbols:
         df = fetch_history(symbol, period="5d", interval="15m")
         if df.empty or len(df) < 25:
@@ -186,12 +147,12 @@ def calc_live_signals(symbols):
         close_price = float(last["Close"])
         sma20 = float(last["sma20"]) if pd.notna(last["sma20"]) else close_price
         rel_vol = float(last["rel_vol"]) if pd.notna(last["rel_vol"]) else 0.0
-        intraday_change = ((float(last["Close"]) - float(prev["Close"])) / float(prev["Close"])) * 100 if float(prev["Close"]) != 0 else 0
+        change_pct = ((float(last["Close"]) - float(prev["Close"])) / float(prev["Close"])) * 100 if float(prev["Close"]) != 0 else 0.0
 
         score = 0
         if close_price < sma20:
             score += 20
-        if intraday_change < -0.3:
+        if change_pct < -0.3:
             score += 20
         if rel_vol > 1.2:
             score += 20
@@ -219,7 +180,7 @@ def calc_live_signals(symbols):
                 "shares": shares,
                 "signal": signal,
                 "rel_vol": round(rel_vol, 2),
-                "change_pct": round(intraday_change, 2),
+                "change_pct": round(change_pct, 2),
             }
         )
 
@@ -262,14 +223,6 @@ def log_active_signals(signals: pd.DataFrame, paper: pd.DataFrame):
         }
         paper = pd.concat([paper, pd.DataFrame([new_row])], ignore_index=True)
         added += 1
-        send_discord_alert(
-            f"🚨 NEW SHORT SETUP\n"
-            f"{row['symbol']} | score {row['score']}\n"
-            f"Entry: {row['entry']}\n"
-            f"Stop: {row['stop_loss']}\n"
-            f"TP1: {row['take_profit_1']}\n"
-            f"TP2: {row['take_profit_2']}"
-        )
 
     return paper, added
 
@@ -307,13 +260,6 @@ def update_open_trades(paper: pd.DataFrame):
         paper.at[idx, "exit_price"] = exit_price
         paper.at[idx, "exit_reason"] = reason
         closed_now += 1
-
-        send_discord_alert(
-            f"{'✅' if pnl > 0 else '🛑'} TRADE CLOSED\n"
-            f"{symbol}\n"
-            f"{reason}\n"
-            f"PnL: ${pnl}"
-        )
 
     return paper, closed_now
 
@@ -397,6 +343,42 @@ Rules:
 
 
 # =========================
+# STYLING
+# =========================
+st.markdown(
+    """
+    <style>
+    .stApp {
+        background: linear-gradient(180deg, #0a0f1c 0%, #0d1320 100%);
+        color: #e8eefc;
+    }
+    [data-testid="stSidebar"] {
+        background: #0f172a;
+        border-right: 1px solid #1f2a44;
+    }
+    div[data-testid="stMetric"] {
+        background: #111a2c;
+        border: 1px solid #223150;
+        border-radius: 18px;
+        padding: 14px;
+        box-shadow: 0 3px 10px rgba(0,0,0,0.18);
+    }
+    div[data-testid="stDataFrame"] {
+        border: 1px solid #223150;
+        border-radius: 16px;
+        overflow: hidden;
+    }
+    .block-container {
+        padding-top: 1rem;
+        padding-bottom: 2rem;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+
+# =========================
 # DATA
 # =========================
 symbols = DEFAULT_SYMBOLS
@@ -425,14 +407,14 @@ page = st.sidebar.radio(
 )
 
 st.sidebar.markdown("---")
-st.sidebar.write(f"**Refresh:** manual")
-st.sidebar.write(f"**Min Score:** 45")
+st.sidebar.write("**Refresh:** manual")
+st.sidebar.write("**Min Score:** 45")
 st.sidebar.write(f"**Symbols:** {', '.join(symbols)}")
 st.sidebar.write(f"**Discord Alerts:** {'On' if DISCORD_WEBHOOK_URL else 'Off'}")
 
 
 # =========================
-# TOP
+# HEADER
 # =========================
 st.title("Mash Trading Dashboard")
 st.caption(f"Last refreshed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
@@ -486,23 +468,22 @@ elif page == "Live Signals":
     if signals.empty:
         st.info("No live signals right now.")
     else:
-        st.dataframe(signals, use_container_width=True, height=420)
+        st.dataframe(signals, width="stretch", height=420)
 
 elif page == "Paper Trades":
     st.subheader("Open Paper Trades")
     if open_trades.empty:
         st.write("No open paper trades.")
     else:
-        st.dataframe(open_trades, use_container_width=True, height=260)
+        st.dataframe(open_trades, width="stretch", height=260)
 
     st.subheader("Closed Paper Trades")
     if closed_trades.empty:
         st.write("No closed paper trades.")
     else:
-        st.dataframe(closed_trades, use_container_width=True, height=260)
+        st.dataframe(closed_trades, width="stretch", height=260)
 
     st.metric("Paper P&L", f"${round(float(paper_pnl), 2)}")
-
 
 elif page == "MashGPT":
     st.subheader("MashGPT")
@@ -544,9 +525,13 @@ elif page == "MashGPT":
         st.markdown(f"### {verdict}")
         st.write(reason)
         st.markdown("---")
+    else:
+        st.info("No live setup available right now.")
 
     if "chat_history" not in st.session_state:
-        st.session_state.chat_history = []
+        st.session_state.chat_history = [
+            ("assistant", "Ask me about the best setup, trade confidence, risk/reward, or any general question.")
+        ]
 
     for role, content in st.session_state.chat_history:
         avatar = "🙂" if role == "user" else "🤖"
@@ -565,193 +550,106 @@ elif page == "MashGPT":
 
         with st.chat_message("assistant", avatar="🤖"):
             st.write(reply)
-        
-        elif page == "Live Market":
-            st.subheader("Live Market")
 
-            if "live_market_symbol" not in st.session_state:
-                st.session_state["live_market_symbol"] = "NVDA"
+elif page == "Live Market":
+    st.subheader("Live Market")
 
-            watchlist = ["AAPL", "NVDA", "META", "MSFT", "TSLA", "AMZN", "SPY", "QQQ"]
+    if "live_market_symbol" not in st.session_state:
+        st.session_state["live_market_symbol"] = "NVDA"
 
-            left, right = st.columns([1, 2.8], gap="large")
+    watchlist = ["AAPL", "NVDA", "META", "MSFT", "TSLA", "AMZN", "SPY", "QQQ"]
 
-            with left:
-                st.markdown("### Watchlist")
+    left, right = st.columns([1, 2.8], gap="large")
 
-                default_symbol = st.session_state.get("live_market_symbol", "NVDA")
-                default_index = watchlist.index(default_symbol) if default_symbol in watchlist else 0
+    with left:
+        st.markdown("### Watchlist")
 
-                selected_symbol = st.selectbox(
-                    "Select Symbol",
-                    options=watchlist,
-                    index=default_index,
-                )
+        default_symbol = st.session_state.get("live_market_symbol", "NVDA")
+        default_index = watchlist.index(default_symbol) if default_symbol in watchlist else 0
 
-                custom_symbol = st.text_input(
-                    "Or search ticker",
-                    value=st.session_state.get("live_market_symbol", selected_symbol)
-                ).upper().strip()
+        selected_symbol = st.selectbox(
+            "Select Symbol",
+            options=watchlist,
+            index=default_index,
+        )
 
-                if custom_symbol:
-                    selected_symbol = custom_symbol
+        custom_symbol = st.text_input(
+            "Or search ticker",
+            value=st.session_state.get("live_market_symbol", selected_symbol)
+        ).upper().strip()
 
-                st.session_state["live_market_symbol"] = selected_symbol
+        if custom_symbol:
+            selected_symbol = custom_symbol
 
-                timeframe = st.selectbox(
-                    "Timeframe",
-                    ["1", "5", "15", "30", "60", "D", "W"],
-                    index=4,
-                    help="1=1m, 5=5m, 15=15m, 30=30m, 60=1h, D=1 day, W=1 week",
-                )
+        st.session_state["live_market_symbol"] = selected_symbol
 
-                market_df = fetch_history(
-                    selected_symbol,
-                    period="6mo" if timeframe in ["D", "W"] else "5d",
-                    interval="1d" if timeframe in ["D", "W"] else "15m",
-                )
+        timeframe = st.selectbox(
+            "Timeframe",
+            ["1", "5", "15", "30", "60", "D", "W"],
+            index=4,
+        )
 
-                if not market_df.empty:
-                    latest_close = float(market_df["Close"].iloc[-1])
-                    first_close = float(market_df["Close"].iloc[0])
-                    change_pct = ((latest_close - first_close) / first_close) * 100 if first_close != 0 else 0.0
-                    latest_volume = int(market_df["Volume"].iloc[-1])
-                    high_val = float(market_df["High"].max())
-                    low_val = float(market_df["Low"].min())
+        market_df = fetch_history(
+            selected_symbol,
+            period="6mo" if timeframe in ["D", "W"] else "5d",
+            interval="1d" if timeframe in ["D", "W"] else "15m",
+        )
 
-                    st.markdown("### Stats")
-                    s1, s2 = st.columns(2)
-                    s1.metric("Last", round(latest_close, 2))
-                    s2.metric("Change %", round(change_pct, 2))
+        if not market_df.empty:
+            latest_close = float(market_df["Close"].iloc[-1])
+            first_close = float(market_df["Close"].iloc[0])
+            change_pct = ((latest_close - first_close) / first_close) * 100 if first_close != 0 else 0.0
+            latest_volume = int(market_df["Volume"].iloc[-1])
+            high_val = float(market_df["High"].max())
+            low_val = float(market_df["Low"].min())
 
-                    s3, s4 = st.columns(2)
-                    s3.metric("High", round(high_val, 2))
-                    s4.metric("Low", round(low_val, 2))
+            st.markdown("### Stats")
+            s1, s2 = st.columns(2)
+            s1.metric("Last", round(latest_close, 2))
+            s2.metric("Change %", round(change_pct, 2))
 
-                    st.metric("Volume", f"{latest_volume:,}")
-                else:
-                    st.warning(f"No data found for {selected_symbol}")
+            s3, s4 = st.columns(2)
+            s3.metric("High", round(high_val, 2))
+            s4.metric("Low", round(low_val, 2))
 
-                st.markdown("### Quick Picks")
-                q1, q2 = st.columns(2)
-                if q1.button("NVDA", use_container_width=True):
-                    st.session_state["live_market_symbol"] = "NVDA"
-                    st.rerun()
-                if q2.button("AAPL", use_container_width=True):
-                    st.session_state["live_market_symbol"] = "AAPL"
-                    st.rerun()
+            st.metric("Volume", f"{latest_volume:,}")
+        else:
+            st.warning(f"No data found for {selected_symbol}")
 
-                q3, q4 = st.columns(2)
-                if q3.button("TSLA", use_container_width=True):
-                    st.session_state["live_market_symbol"] = "TSLA"
-                    st.rerun()
-                if q4.button("SPY", use_container_width=True):
-                    st.session_state["live_market_symbol"] = "SPY"
-                    st.rerun()
+    with right:
+        st.markdown(f"### {selected_symbol} Chart")
 
-            with right:
-                st.markdown(f"### {selected_symbol} Chart")
+        tradingview_html = f"""
+        <div class="tradingview-widget-container" style="height:820px;width:100%">
+          <div id="tradingview_chart"></div>
+          <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+          <script type="text/javascript">
+            new TradingView.widget({{
+              "autosize": true,
+              "symbol": "{selected_symbol}",
+              "interval": "{timeframe}",
+              "timezone": "America/New_York",
+              "theme": "dark",
+              "style": "1",
+              "locale": "en",
+              "toolbar_bg": "#0b1220",
+              "enable_publishing": false,
+              "allow_symbol_change": true,
+              "hide_top_toolbar": false,
+              "hide_legend": false,
+              "save_image": false,
+              "withdateranges": true,
+              "studies": [
+                "Volume@tv-basicstudies"
+              ],
+              "container_id": "tradingview_chart"
+            }});
+          </script>
+        </div>
+        """
 
-                tradingview_html = f"""
-                <div class="tradingview-widget-container" style="height:820px;width:100%">
-                <div id="tradingview_chart"></div>
-                <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
-                <script type="text/javascript">
-                    new TradingView.widget({{
-                    "autosize": true,
-                    "symbol": "{selected_symbol}",
-                    "interval": "{timeframe}",
-                    "timezone": "America/New_York",
-                    "theme": "dark",
-                    "style": "1",
-                    "locale": "en",
-                    "toolbar_bg": "#0b1220",
-                    "enable_publishing": false,
-                    "allow_symbol_change": true,
-                    "hide_top_toolbar": false,
-                    "hide_legend": false,
-                    "save_image": false,
-                    "withdateranges": true,
-                    "studies": [
-                        "Volume@tv-basicstudies"
-                    ],
-                    "container_id": "tradingview_chart"
-                    }});
-                </script>
-                </div>
-                """
+        components.html(tradingview_html, height=840)
 
-                components.html(tradingview_html, height=840)
-
-                if not market_df.empty:
-                    st.markdown("### Raw Data")
-                    st.dataframe(market_df.tail(100), use_container_width=True, height=220)
-
-        elif page == "Live Market":
-                st.subheader("Live Market")
-
-                if "live_market_symbol" not in st.session_state:
-                    st.session_state["live_market_symbol"] = "NVDA"
-
-                        watchlist = ["AAPL", "NVDA", "META", "MSFT", "TSLA", "AMZN", "SPY", "QQQ"]
-
-                        left, right = st.columns([1, 2.8], gap="large")
-
-                        with left:
-                            st.markdown("### Watchlist")
-
-                            default_symbol = st.session_state.get("live_market_symbol", "NVDA")
-                            default_index = watchlist.index(default_symbol) if default_symbol in watchlist else 0
-
-                            selected_symbol = st.selectbox(
-                                "Select Symbol",
-                                options=watchlist,
-                                index=default_index,
-                            )
-
-                            custom_symbol = st.text_input(
-                                "Or search ticker",
-                                value=st.session_state.get("live_market_symbol", selected_symbol)
-                            ).upper().strip()
-
-                            if custom_symbol:
-                                selected_symbol = custom_symbol
-
-                            st.session_state["live_market_symbol"] = selected_symbol
-
-                            timeframe = st.selectbox(
-                                "Timeframe",
-                                ["1", "5", "15", "30", "60", "D", "W"],
-                                index=4,
-                            )
-
-                            market_df = fetch_history(
-                                selected_symbol,
-                                period="6mo" if timeframe in ["D", "W"] else "5d",
-                                interval="1d" if timeframe in ["D", "W"] else "15m",
-                            )
-
-                            if not market_df.empty:
-                                latest_close = float(market_df["Close"].iloc[-1])
-                                first_close = float(market_df["Close"].iloc[0])
-                                change_pct = ((latest_close - first_close) / first_close) * 100 if first_close != 0 else 0.0
-                                latest_volume = int(market_df["Volume"].iloc[-1])
-                                high_val = float(market_df["High"].max())
-                                low_val = float(market_df["Low"].min())
-
-                                st.markdown("### Stats")
-                                s1, s2 = st.columns(2)
-                                s1.metric("Last", round(latest_close, 2))
-                                s2.metric("Change %", round(change_pct, 2))
-
-                                s3, s4 = st.columns(2)
-                                s3.metric("High", round(high_val, 2))
-                                s4.metric("Low", round(low_val, 2))
-
-                                st.metric("Volume", f"{latest_volume:,}")
-                            else:
-                                st.warning(f"No data found for {selected_symbol}")
-
-                        with right:
-                            st.markdown(f"### {selected_symbol} Chart")
-                            st.write("Chart goes here for now.")
+        if not market_df.empty:
+            st.markdown("### Raw Data")
+            st.dataframe(market_df.tail(100), width="stretch", height=220)
