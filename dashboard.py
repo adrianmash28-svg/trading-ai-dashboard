@@ -504,8 +504,10 @@ elif page == "Paper Trades":
 
 elif page == "MashGPT":
     st.subheader("MashGPT")
+elif page == "MashGPT":
+    st.subheader("MashGPT")
 
-        if signals is not None and not signals.empty:
+    if signals is not None and not signals.empty:
         best_signal = signals.sort_values("score", ascending=False).iloc[0]
 
         score_val = int(best_signal["score"])
@@ -529,6 +531,18 @@ elif page == "MashGPT":
         c6.metric("TP1", best_signal["take_profit_1"])
         c7.metric("TP2", best_signal["take_profit_2"])
 
+        if score_val >= 70:
+            verdict = "🔥 TAKE"
+            reason = "Strong setup, good momentum and risk/reward."
+        elif score_val >= 50:
+            verdict = "⚠️ WATCH"
+            reason = "Decent setup but not the strongest."
+        else:
+            verdict = "❌ AVOID"
+            reason = "Weak setup, low probability."
+
+        st.markdown(f"### {verdict}")
+        st.write(reason)
         st.markdown("---")
 
     if "chat_history" not in st.session_state:
@@ -551,6 +565,8 @@ elif page == "MashGPT":
 
         with st.chat_message("assistant", avatar="🤖"):
             st.write(reply)
+        
+    
 
 elif page == "Live Market":
     st.subheader("Live Market")
