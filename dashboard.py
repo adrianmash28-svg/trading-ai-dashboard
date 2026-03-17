@@ -566,32 +566,43 @@ elif page == "MashGPT":
         with st.chat_message("assistant", avatar="🤖"):
             st.write(reply)
         
-    
-elif page == "Live Market":
+    elif page == "Live Market":
     st.subheader("Live Market")
+
+    if "live_market_symbol" not in st.session_state:
+        st.session_state["live_market_symbol"] = "NVDA"
 
     watchlist = ["AAPL", "NVDA", "META", "MSFT", "TSLA", "AMZN", "SPY", "QQQ"]
 
-    top1, top2 = st.columns([1, 3])
+    left, right = st.columns([1, 2.8], gap="large")
 
-    with top1:
+    with left:
         st.markdown("### Watchlist")
+
+        default_symbol = st.session_state.get("live_market_symbol", "NVDA")
+        default_index = watchlist.index(default_symbol) if default_symbol in watchlist else 0
 
         selected_symbol = st.selectbox(
             "Select Symbol",
             options=watchlist,
-            index=0,
+            index=default_index,
         )
 
-        custom_symbol = st.text_input("Or search ticker", value=selected_symbol).upper().strip()
+        custom_symbol = st.text_input(
+            "Or search ticker",
+            value=st.session_state.get("live_market_symbol", selected_symbol)
+        ).upper().strip()
+
         if custom_symbol:
             selected_symbol = custom_symbol
 
+        st.session_state["live_market_symbol"] = selected_symbol
+
         timeframe = st.selectbox(
             "Timeframe",
-            ["1", "5", "15", "60", "D", "W"],
+            ["1", "5", "15", "30", "60", "D", "W"],
             index=4,
-            help="TradingView interval: 1=1m, 5=5m, 15=15m, 60=1h, D=1 day, W=1 week",
+            help="1=1m, 5=5m, 15=15m, 30=30m, 60=1h, D=1 day, W=1 week",
         )
 
         market_df = fetch_history(
@@ -605,25 +616,44 @@ elif page == "Live Market":
             first_close = float(market_df["Close"].iloc[0])
             change_pct = ((latest_close - first_close) / first_close) * 100 if first_close != 0 else 0.0
             latest_volume = int(market_df["Volume"].iloc[-1])
+            high_val = float(market_df["High"].max())
+            low_val = float(market_df["Low"].min())
 
-            st.metric("Last Price", round(latest_close, 2))
-            st.metric("Period Change %", round(change_pct, 2))
-            st.metric("Latest Volume", f"{latest_volume:,}")
+            st.markdown("### Stats")
+            s1, s2 = st.columns(2)
+            s1.metric("Last", round(latest_close, 2))
+            s2.metric("Change %", round(change_pct, 2))
 
-            day_high = float(market_df["High"].max())
-            day_low = float(market_df["Low"].min())
+            s3, s4 = st.columns(2)
+            s3.metric("High", round(high_val, 2))
+            s4.metric("Low", round(low_val, 2))
 
-            c1, c2 = st.columns(2)
-            c1.metric("High", round(day_high, 2))
-            c2.metric("Low", round(day_low, 2))
+            st.metric("Volume", f"{latest_volume:,}")
         else:
             st.warning(f"No data found for {selected_symbol}")
 
-    with top2:
+        st.markdown("### Quick Picks")
+        q1, q2 = st.columns(2)
+        if q1.button("NVDA", use_container_width=True):
+            st.session_state["live_market_symbol"] = "NVDA"
+            st.rerun()
+        if q2.button("AAPL", use_container_width=True):
+            st.session_state["live_market_symbol"] = "AAPL"
+            st.rerun()
+
+        q3, q4 = st.columns(2)
+        if q3.button("TSLA", use_container_width=True):
+            st.session_state["live_market_symbol"] = "TSLA"
+            st.rerun()
+        if q4.button("SPY", use_container_width=True):
+            st.session_state["live_market_symbol"] = "SPY"
+            st.rerun()
+
+    with right:
         st.markdown(f"### {selected_symbol} Chart")
 
         tradingview_html = f"""
-        <div class="tradingview-widget-container" style="height:700px;width:100%">
+        <div class="tradingview-widget-container" style="height:820px;width:100%">
           <div id="tradingview_chart"></div>
           <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
           <script type="text/javascript">
@@ -641,6 +671,7 @@ elif page == "Live Market":
               "hide_top_toolbar": false,
               "hide_legend": false,
               "save_image": false,
+              "withdateranges": true,
               "studies": [
                 "Volume@tv-basicstudies"
               ],
@@ -650,22 +681,8 @@ elif page == "Live Market":
         </div>
         """
 
-        components.html(tradingview_html, height=720)
+        components.html(tradingview_html, height=840)
 
-    st.markdown("---")
-
-    st.markdown("### Quick Symbol Buttons")
-    b1, b2, b3, b4, b5, b6 = st.columns(6)
-
-    if b1.button("AAPL"):
-        st.session_state["live_market_symbol"] = "AAPL"
-    if b2.button("NVDA"):
-        st.session_state["live_market_symbol"] = "NVDA"
-    if b3.button("META"):
-        st.session_state["live_market_symbol"] = "META"
-    if b4.button("MSFT"):
-        st.session_state["live_market_symbol"] = "MSFT"
-    if b5.button("TSLA"):
-        st.session_state["live_market_symbol"] = "TSLA"
-    if b6.button("SPY"):
-        st.session_state["live_market_symbol"] = "SPY"
+        if not market_df.empty:
+            st.markdown("### Raw Data")
+            st.dataframe(market_df.tail(100), use_container_width=True, height=220)
