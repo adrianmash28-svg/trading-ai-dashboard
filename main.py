@@ -614,16 +614,22 @@ elif page == "Live Market":
             st.session_state["live_market_symbol"] = "SPY"
             st.rerun()
 
-    with right:
-        st.markdown(f"### {selected_symbol} Chart")
+with right:
+    st.markdown(f"### {selected_symbol} Chart")
 
+    c_left, c_mid, c_right = st.columns([1, 2.2, 1])
+
+    with c_mid:
         tradingview_html = f"""
-        <div class="tradingview-widget-container" style="height:820px;width:100%">
-          <div id="tradingview_chart"></div>
+        <div class="tradingview-widget-container" style="height:1400px;width:100%">
+          <div id="tradingview_chart" style="height:100%;width:100%"></div>
+
           <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+
           <script type="text/javascript">
             new TradingView.widget({{
-              "autosize": true,
+              "width": "100%",
+              "height": "100%",
               "symbol": "{selected_symbol}",
               "interval": "{timeframe}",
               "timezone": "America/Los_Angeles",
@@ -643,8 +649,8 @@ elif page == "Live Market":
         </div>
         """
 
-        components.html(tradingview_html, height=840)
+        components.html(tradingview_html, height=1400)
 
-        if not market_df.empty:
-            st.markdown("### Raw Data")
+    if not market_df.empty:
+        with st.expander("Show raw market data"):
             st.dataframe(market_df.tail(100), width="stretch", height=220)
