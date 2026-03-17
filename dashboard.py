@@ -541,78 +541,48 @@ elif page == "Live Market":
     left, right = st.columns([0.9, 4.6], gap="large")
   
     with left:
-        st.markdown("### Market Panel")
-
-        default_symbol = st.session_state.get("live_market_symbol", "NVDA")
-        default_index = watchlist.index(default_symbol) if default_symbol in watchlist else 0
-
-        selected_symbol = st.selectbox(
-            "Ticker",
-            options=watchlist,
-            index=default_index,
-        )
-
-        custom_symbol = st.text_input(
-            "Search ticker",
-            value=default_symbol
-        ).upper().strip()
-
-        if custom_symbol:
-            selected_symbol = custom_symbol
-
-        st.session_state["live_market_symbol"] = selected_symbol
-
-        timeframe = st.selectbox(
-            "Timeframe",
-            ["1", "5", "15", "30", "60", "D", "W"],
-            index=4,
-        )
-
-        market_df = fetch_history(
-            selected_symbol,
-            period="6mo" if timeframe in ["D", "W"] else "5d",
-            interval="1d" if timeframe in ["D", "W"] else "15m",
-        )
-
+        st.markdown("## Market Panel")
+    
+        # 🔹 TOP CONTROLS
+        col1, col2 = st.columns(2)
+    
+        with col1:
+            selected_symbol = st.selectbox("Ticker", ["NVDA", "AAPL", "TSLA", "SPY"])
+    
+        with col2:
+            timeframe = st.selectbox("Timeframe", ["1", "5", "15", "60", "D"])
+    
+        # 🔹 SEARCH
+        search = st.text_input("Search ticker", selected_symbol)
+    
+        # 🔹 QUICK PICKS
         st.markdown("### Quick Picks")
-        q1, q2 = st.columns(2)
-        if q1.button("NVDA", use_container_width=True):
-            st.session_state["live_market_symbol"] = "NVDA"
-            st.rerun()
-        if q2.button("AAPL", use_container_width=True):
-            st.session_state["live_market_symbol"] = "AAPL"
-            st.rerun()
-
-        q3, q4 = st.columns(2)
-        if q3.button("TSLA", use_container_width=True):
-            st.session_state["live_market_symbol"] = "TSLA"
-            st.rerun()
-        if q4.button("SPY", use_container_width=True):
-            st.session_state["live_market_symbol"] = "SPY"
-            st.rerun()
-
-        if not market_df.empty:
-            latest_close = float(market_df["Close"].iloc[-1])
-            first_close = float(market_df["Close"].iloc[0])
-            change_pct = ((latest_close - first_close) / first_close) * 100 if first_close != 0 else 0.0
-            latest_volume = int(market_df["Volume"].iloc[-1])
-            high_val = float(market_df["High"].max())
-            low_val = float(market_df["Low"].min())
-
-            st.markdown("### Stats")
-
-            s1, s2 = st.columns(2)
-            s1.metric("Last", round(latest_close, 2))
-            s2.metric("Change %", round(change_pct, 2))
-
-            s3, s4 = st.columns(2)
-            s3.metric("High", round(high_val, 2))
-            s4.metric("Low", round(low_val, 2))
-
-            st.metric("Volume", f"{latest_volume:,}")
-        else:
-            st.warning(f"No data found for {selected_symbol}")
-
+        q1, q2, q3, q4 = st.columns(4)
+    
+        if q1.button("NVDA"): selected_symbol = "NVDA"
+        if q2.button("AAPL"): selected_symbol = "AAPL"
+        if q3.button("TSLA"): selected_symbol = "TSLA"
+        if q4.button("SPY"): selected_symbol = "SPY"
+    
+        st.markdown("---")
+    
+        # 🔹 STATS
+        st.markdown("### Stats")
+    
+        s1, s2 = st.columns(2)
+        s3, s4 = st.columns(2)
+    
+        with s1:
+            st.metric("Last", f"{last_price:.2f}")
+        with s2:
+            st.metric("Change %", f"{change_pct:.2f}%")
+    
+        with s3:
+            st.metric("High", f"{high_price:.2f}")
+        with s4:
+            st.metric("Low", f"{low_price:.2f}")
+    
+        st.metric("Volume", f"{volume:,}")
 
         with right:
             st.markdown(f"### {selected_symbol} Chart")
