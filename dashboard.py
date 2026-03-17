@@ -334,27 +334,66 @@ def create_backtest_placeholder():
     return trades
 
 
-def ask_mashgpt(prompt: str):
+def ask_mashgpt(prompt: str, signals_df: pd.DataFrame, open_trades_df: pd.DataFrame, closed_trades_df: pd.DataFrame):
     if not client:
         return "OpenAI key is not connected."
 
     try:
+        if signals_df is None or signals_df.empty:
+            signals_text = "No live signals right now."
+        else:
+            signals_text = signals_df.head(10).to_string(index=False)
+
+        if open_trades_df is None or open_trades_df.empty:
+            open_trades_text = "No open paper trades."
+        else:
+            open_trades_text = open_trades_df.to_string(index=False)
+
+        if closed_trades_df is None or closed_trades_df.empty:
+            closed_trades_text = "No closed paper trades."
+        else:
+            closed_trades_text = closed_trades_df.tail(15).to_string(index=False)
+
+        system_prompt = f"""
+You are MashGPT, a smart trading assistant.
+
+Your job:
+- answer normal questions clearly
+- answer trading questions with practical reasoning
+- use the dashboard data below when relevant
+- help rank setups, explain signals, discuss risk/reward, and evaluate trades
+- do NOT guarantee profits
+- be concise but useful
+- when talking about trades, mention entry, stop, targets, score, and risk if available
+
+Current live signals:
+{signals_text}
+
+Open paper trades:
+{open_trades_text}
+
+Closed paper trades:
+{closed_trades_text}
+
+When the user asks trading questions:
+- explain why a setup looks strong or weak
+- compare signal score, relative move, and reward/risk
+- if asked "best setup", choose the strongest current signal
+- if asked "should I take this trade", give pros/cons, not certainty
+- if asked for confidence, give a 1-10 score with a short reason
+"""
+
         response = client.responses.create(
             model="gpt-5",
             input=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You are MashGPT, a smart trading assistant. "
-                        "Answer clearly and helpfully. You can answer trading questions and normal general questions."
-                    ),
-                },
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt},
             ],
         )
+
         text = getattr(response, "output_text", None)
         if text:
-            return text
+            return text.strip()
         return "I couldn't generate a response."
     except Exception as e:
         return f"Error: {e}"
@@ -485,7 +524,7 @@ elif page == "MashGPT":
         with st.chat_message("user", avatar="🙂"):
             st.write(prompt)
 
-        reply = ask_mashgpt(prompt)
+        reply = ask_mashgpt(prompt, signals, open_trades, closed_trades)
         st.session_state.chat_history.append(("assistant", reply))
 
         with st.chat_message("assistant", avatar="🤖"):
