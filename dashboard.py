@@ -614,39 +614,37 @@ elif page == "Live Market":
             st.warning(f"No data found for {selected_symbol}")
 
 
-    with right:
-        st.markdown(f"### {selected_symbol} Chart")
-    
-        tradingview_html = f"""
-        <div style="width:100%; display:flex; justify-content:center;">
-          <div id="tradingview_chart" style="width:1000px; height:1100px;"></div>
-        </div>
-    
-        <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
-        <script type="text/javascript">
-          new TradingView.widget({{
-            "width": 1000,
-            "height": 1100,
-            "symbol": "{selected_symbol}",
-            "interval": "{timeframe}",
-            "timezone": "America/Los_Angeles",
-            "theme": "dark",
-            "style": "1",
-            "locale": "en",
-            "toolbar_bg": "#0b1220",
-            "enable_publishing": false,
-            "allow_symbol_change": true,
-            "hide_top_toolbar": false,
-            "hide_legend": false,
-            "save_image": false,
-            "withdateranges": true,
-            "container_id": "tradingview_chart"
-          }});
-        </script>
-        """
-    
-        components.html(tradingview_html, height=1120)
-    
-        if not market_df.empty:
-            with st.expander("Show raw market data"):
-                st.dataframe(market_df.tail(100), width="stretch", height=220)
+        with right:
+            st.markdown(f"### {selected_symbol} Chart")
+        
+            tradingview_html = f"""
+            <div id="tradingview_chart" style="width:100%; height:1300px;"></div>
+        
+            <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+            <script type="text/javascript">
+              new TradingView.widget({{
+                "width": "100%",
+                "height": 1300,
+                "symbol": "{selected_symbol}",
+                "interval": "{timeframe}",
+                "timezone": "America/Los_Angeles",
+                "theme": "dark",
+                "style": "1",
+                "locale": "en",
+                "toolbar_bg": "#0b1220",
+                "enable_publishing": false,
+                "allow_symbol_change": true,
+                "hide_top_toolbar": false,
+                "hide_legend": false,
+                "save_image": false,
+                "withdateranges": true,
+                "container_id": "tradingview_chart"
+              }});
+            </script>
+            """
+        
+            components.html(tradingview_html, height=1320)
+        
+            if not market_df.empty:
+                with st.expander("Show raw market data"):
+                    st.dataframe(market_df.tail(100), width="stretch", height=220)
