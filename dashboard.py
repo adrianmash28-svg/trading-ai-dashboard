@@ -621,32 +621,35 @@ with right:
 
     with c_mid:
         tradingview_html = f"""
-        <div class="tradingview-widget-container" style="height:1200px;width:100%">
-          <div id="tradingview_chart"></div>
-          <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
-          <script type="text/javascript">
-            new TradingView.widget({{
-              "autosize": true,
-              "symbol": "{selected_symbol}",
-              "interval": "{timeframe}",
-              "timezone": "America/Los_Angeles",
-              "theme": "dark",
-              "style": "1",
-              "locale": "en",
-              "toolbar_bg": "#0b1220",
-              "enable_publishing": false,
-              "allow_symbol_change": true,
-              "hide_top_toolbar": false,
-              "hide_legend": false,
-              "save_image": false,
-              "withdateranges": true,
-              "container_id": "tradingview_chart"
-            }});
-          </script>
-        </div>
-        """
+<div class="tradingview-widget-container" style="height:1400px;width:100%">
+  <div id="tradingview_chart" style="height:100%;width:100%"></div>
 
-        components.html(tradingview_html, height=1200)
+  <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+
+  <script type="text/javascript">
+    new TradingView.widget({{
+      "width": "100%",
+      "height": "100%",
+      "symbol": "{selected_symbol}",
+      "interval": "{timeframe}",
+      "timezone": "America/Los_Angeles",
+      "theme": "dark",
+      "style": "1",
+      "locale": "en",
+      "toolbar_bg": "#0b1220",
+      "enable_publishing": false,
+      "allow_symbol_change": true,
+      "hide_top_toolbar": false,
+      "hide_legend": false,
+      "save_image": false,
+      "withdateranges": true,
+      "container_id": "tradingview_chart"
+    }});
+  </script>
+</div>
+"""
+
+components.html(tradingview_html, height=1400)
 
     if not market_df.empty:
         with st.expander("Show raw market data"):
