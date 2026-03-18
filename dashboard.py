@@ -889,15 +889,35 @@ def summarize_backtest_results(backtest_trades: pd.DataFrame):
 
 def compare_strategy_results(champion_summary, challenger_summary):
     drawdown_limit = abs(float(champion_summary.get("max_drawdown", 0.0))) * (1 + MAX_DRAWDOWN_DEGRADATION)
-    eligible = (
-        challenger_summary.get("num_trades", 0) >= MIN_PROMOTION_TRADES
-        and challenger_summary.get("win_rate", 0.0) >= champion_summary.get("win_rate", 0.0)
-        and challenger_summary.get("total_pnl", 0.0) >= champion_summary.get("total_pnl", 0.0)
-        and abs(float(challenger_summary.get("max_drawdown", 0.0))) <= max(drawdown_limit, 1.0)
-        and challenger_summary.get("out_of_sample_pnl", 0.0) >= champion_summary.get("out_of_sample_pnl", 0.0)
-        and challenger_summary.get("out_of_sample_win_rate", 0.0) >= champion_summary.get("out_of_sample_win_rate", 0.0)
-    )
-    return eligible
+    checks = [
+        {
+            "check": "Minimum trade count",
+            "passed": challenger_summary.get("num_trades", 0) >= MIN_PROMOTION_TRADES,
+            "detail": f"{challenger_summary.get('num_trades', 0)} / {MIN_PROMOTION_TRADES}",
+        },
+        {
+            "check": "P&L better than champion",
+            "passed": challenger_summary.get("total_pnl", 0.0) > champion_summary.get("total_pnl", 0.0),
+            "detail": f"${challenger_summary.get('total_pnl', 0.0):,.2f} vs ${champion_summary.get('total_pnl', 0.0):,.2f}",
+        },
+        {
+            "check": "Win rate not worse",
+            "passed": challenger_summary.get("win_rate", 0.0) >= champion_summary.get("win_rate", 0.0),
+            "detail": f"{challenger_summary.get('win_rate', 0.0):.2f}% vs {champion_summary.get('win_rate', 0.0):.2f}%",
+        },
+        {
+            "check": "Drawdown not materially worse",
+            "passed": abs(float(challenger_summary.get("max_drawdown", 0.0))) <= max(drawdown_limit, 1.0),
+            "detail": f"${challenger_summary.get('max_drawdown', 0.0):,.2f} vs limit ${max(drawdown_limit, 1.0):,.2f}",
+        },
+        {
+            "check": "Out-of-sample validation",
+            "passed": challenger_summary.get("out_of_sample_pnl", 0.0) >= champion_summary.get("out_of_sample_pnl", 0.0)
+            and challenger_summary.get("out_of_sample_win_rate", 0.0) >= champion_summary.get("out_of_sample_win_rate", 0.0),
+            "detail": f"P&L ${challenger_summary.get('out_of_sample_pnl', 0.0):,.2f} | Win {challenger_summary.get('out_of_sample_win_rate', 0.0):.2f}%",
+        },
+    ]
+    return all(check["passed"] for check in checks), checks
 
 
 def run_validation_split(symbols, params):
@@ -923,7 +943,7 @@ def run_validation_split(symbols, params):
     return all_trades, combined, out_summary
 
 
-def build_strategy_record(strategy_id, version, status, params, summary, promotion_status, paper_probation_passed=False):
+def build_strategy_record(strategy_id, version, status, params, summary, promotion_status, paper_probation_passed=False, promotion_date="", promotion_checks=None):
     return {
         "id": strategy_id,
         "version": version,
@@ -933,6 +953,8 @@ def build_strategy_record(strategy_id, version, status, params, summary, promoti
         "promotion_status": promotion_status,
         "paper_probation_passed": paper_probation_passed,
         "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "promotion_date": promotion_date,
+        "promotion_checks": promotion_checks or [],
     }
 
 
@@ -984,7 +1006,8 @@ def advance_strategy_research(registry):
 
     _, challenger_summary, _ = run_validation_split(BACKTEST_SYMBOLS, next_candidate)
     champion_summary = registry["champion"].get("results_summary", {})
-    eligible = compare_strategy_results(champion_summary, challenger_summary) if champion_summary else False
+    eligible, checks = compare_strategy_results(champion_summary, challenger_summary) if champion_summary else (False, [])
+    failed_reasons = [check["check"] for check in checks if not check["passed"]]
     experiment_version = len(registry.get("experiments", [])) + 1
     experiment_record = build_strategy_record(
         f"challenger-v{experiment_version}",
@@ -992,8 +1015,10 @@ def advance_strategy_research(registry):
         "challenger",
         next_candidate,
         challenger_summary,
-        "Promoted to champion" if eligible else "Rejected by promotion gates",
+        "Promoted to champion" if eligible else f"Rejected: {', '.join(failed_reasons) if failed_reasons else 'Promotion gates not met'}",
         paper_probation_passed=eligible,
+        promotion_date=datetime.now().strftime("%Y-%m-%d %H:%M:%S") if eligible else "",
+        promotion_checks=checks,
     )
     registry.setdefault("experiments", []).append(experiment_record)
     if eligible:
@@ -1008,7 +1033,7 @@ def advance_strategy_research(registry):
         registry["challenger"] = {
             **experiment_record,
             "status": "challenger",
-            "promotion_status": "Rejected by promotion gates",
+            "promotion_status": f"Rejected: {', '.join(failed_reasons) if failed_reasons else 'Promotion gates not met'}",
         }
     registry["last_research_run"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     save_strategy_registry(registry)
@@ -1030,7 +1055,11 @@ def promote_challenger(registry):
         return registry, False
 
     champion_summary = registry["champion"].get("results_summary", {})
-    if not compare_strategy_results(champion_summary, challenger.get("results_summary", {})):
+    eligible, checks = compare_strategy_results(champion_summary, challenger.get("results_summary", {}))
+    if not eligible:
+        registry["challenger"]["promotion_status"] = "Rejected: Manual promotion checks failed"
+        registry["challenger"]["promotion_checks"] = checks
+        save_strategy_registry(registry)
         return registry, False
 
     registry["previous_champion"] = registry["champion"]
@@ -1038,6 +1067,8 @@ def promote_challenger(registry):
         **challenger,
         "status": "champion",
         "promotion_status": "Promoted to champion",
+        "promotion_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "promotion_checks": checks,
     }
     registry["challenger"] = None
     save_strategy_registry(registry)
@@ -2216,6 +2247,7 @@ elif page == "Strategy Lab":
             """,
             unsafe_allow_html=True,
         )
+        st.caption(f"Promotion date: {format_strategy_timestamp(champion.get('promotion_date', ''))}")
         st.json(champion["parameters"], expanded=False)
 
     with chall_col:
@@ -2231,6 +2263,7 @@ elif page == "Strategy Lab":
                 """,
                 unsafe_allow_html=True,
             )
+            st.caption(f"Recorded: {format_strategy_timestamp(challenger.get('created_at', ''))}")
             st.json(challenger["parameters"], expanded=False)
         else:
             st.info("No active challenger has cleared the research gates yet.")
@@ -2238,17 +2271,23 @@ elif page == "Strategy Lab":
     st.markdown("### Promotion Status")
     if challenger:
         challenger_summary = challenger.get("results_summary", {})
+        check_rows = challenger.get("promotion_checks", [])
         promotion_checks = pd.DataFrame(
             [
-                {"check": "Minimum trade count", "status": "Pass" if challenger_summary.get("num_trades", 0) >= MIN_PROMOTION_TRADES else "Fail"},
-                {"check": "Win rate >= champion", "status": "Pass" if challenger_summary.get("win_rate", 0.0) >= champion_summary.get("win_rate", 0.0) else "Fail"},
-                {"check": "Net P&L >= champion", "status": "Pass" if challenger_summary.get("total_pnl", 0.0) >= champion_summary.get("total_pnl", 0.0) else "Fail"},
-                {"check": "Drawdown not materially worse", "status": "Pass" if abs(float(challenger_summary.get("max_drawdown", 0.0))) <= max(abs(float(champion_summary.get("max_drawdown", 0.0))) * (1 + MAX_DRAWDOWN_DEGRADATION), 1.0) else "Fail"},
-                {"check": "Out-of-sample validation", "status": "Pass" if challenger_summary.get("out_of_sample_pnl", 0.0) >= champion_summary.get("out_of_sample_pnl", 0.0) and challenger_summary.get("out_of_sample_win_rate", 0.0) >= champion_summary.get("out_of_sample_win_rate", 0.0) else "Fail"},
-                {"check": "Paper probation", "status": "Pass" if challenger.get("paper_probation_passed") else "Pending"},
+                {
+                    "check": check.get("check", ""),
+                    "status": "Pass" if check.get("passed") else "Fail",
+                    "detail": check.get("detail", ""),
+                }
+                for check in check_rows
             ]
         )
         st.dataframe(promotion_checks, width="stretch", height=245)
+        failed_checks = [row["check"] for row in check_rows if not row.get("passed")]
+        if failed_checks:
+            st.caption(f"Why it failed: {', '.join(failed_checks)}")
+        else:
+            st.caption("Challenger passed the current promotion rules.")
 
         compare_left, compare_right = st.columns(2)
         with compare_left:
@@ -2275,6 +2314,7 @@ elif page == "Strategy Lab":
             experiment_rows.append(
                 {
                     "changed_at": format_strategy_timestamp(exp.get("created_at", "")),
+                    "promotion_date": format_strategy_timestamp(exp.get("promotion_date", "")),
                     "strategy": strategy_to_label(exp),
                     "status": exp.get("promotion_status", ""),
                     "trades": summary.get("num_trades", 0),
