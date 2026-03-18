@@ -433,6 +433,43 @@ st.markdown(
         border-radius: 16px;
         overflow: hidden;
     }
+    .top-trade-banner {
+        background: linear-gradient(135deg, rgba(30, 41, 59, 0.95) 0%, rgba(15, 23, 42, 0.98) 100%);
+        border: 1px solid #f59e0b;
+        border-radius: 20px;
+        padding: 18px 22px;
+        margin: 0.25rem 0 1rem 0;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.22);
+    }
+    .top-trade-kicker {
+        color: #fbbf24;
+        font-size: 0.8rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 0.45rem;
+    }
+    .top-trade-grid {
+        display: grid;
+        grid-template-columns: repeat(6, minmax(0, 1fr));
+        gap: 0.9rem;
+    }
+    .top-trade-item {
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid rgba(148, 163, 184, 0.18);
+        border-radius: 14px;
+        padding: 0.85rem 0.95rem;
+    }
+    .top-trade-label {
+        color: #94a3b8;
+        font-size: 0.8rem;
+        margin-bottom: 0.25rem;
+    }
+    .top-trade-value {
+        color: #f8fafc;
+        font-size: 1.1rem;
+        font-weight: 700;
+    }
     .block-container {
         padding-top: 1rem;
         padding-bottom: 2rem;
@@ -483,6 +520,43 @@ m4.metric("Live Setups", int((signals["signal"] == "SHORT SETUP").sum()) if not 
 
 
 if page == "Dashboard":
+    if not signals.empty:
+        best_signal = signals.sort_values("score", ascending=False).iloc[0]
+        st.markdown(
+            f"""
+            <div class="top-trade-banner">
+                <div class="top-trade-kicker">Top Trade Banner</div>
+                <div class="top-trade-grid">
+                    <div class="top-trade-item">
+                        <div class="top-trade-label">Symbol</div>
+                        <div class="top-trade-value">{best_signal["symbol"]}</div>
+                    </div>
+                    <div class="top-trade-item">
+                        <div class="top-trade-label">Score</div>
+                        <div class="top-trade-value">{int(best_signal["score"])}</div>
+                    </div>
+                    <div class="top-trade-item">
+                        <div class="top-trade-label">Entry</div>
+                        <div class="top-trade-value">{best_signal["entry"]}</div>
+                    </div>
+                    <div class="top-trade-item">
+                        <div class="top-trade-label">Stop</div>
+                        <div class="top-trade-value">{best_signal["stop_loss"]}</div>
+                    </div>
+                    <div class="top-trade-item">
+                        <div class="top-trade-label">TP1</div>
+                        <div class="top-trade-value">{best_signal["take_profit_1"]}</div>
+                    </div>
+                    <div class="top-trade-item">
+                        <div class="top-trade-label">TP2</div>
+                        <div class="top-trade-value">{best_signal["take_profit_2"]}</div>
+                    </div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
     c1, c2 = st.columns(2)
 
     with c1:
