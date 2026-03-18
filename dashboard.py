@@ -609,17 +609,18 @@ win_rate = round((performance["pnl"] > 0).mean() * 100, 2) if not closed_trades.
 total_pnl = round(float(performance["pnl"].sum()), 2)
 
 
-st.sidebar.title("📊 Navigation")
+st.sidebar.markdown("## Terminal")
+st.sidebar.caption("Trading workspace")
 page = st.sidebar.radio(
-    "Go to",
+    "Navigate",
     ["Dashboard", "Setups", "Live Signals", "Paper Trades", "MashGPT", "Live Market"],
 )
 
 st.sidebar.markdown("---")
-st.sidebar.write("**Refresh:** manual")
-st.sidebar.write("**Min Score:** 45")
-st.sidebar.write(f"**Symbols:** {', '.join(symbols)}")
-st.sidebar.write(f"**Discord Alerts:** {'On' if DISCORD_WEBHOOK_URL else 'Off'}")
+st.sidebar.markdown("##### Market Watch")
+st.sidebar.caption(", ".join(symbols))
+st.sidebar.markdown("##### Status")
+st.sidebar.write(f"Discord Alerts: {'On' if DISCORD_WEBHOOK_URL else 'Off'}")
 
 
 st.title("Mash Trading Dashboard")
