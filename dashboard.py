@@ -350,6 +350,33 @@ def get_setup_verdict(score: float) -> str:
     return "AVOID"
 
 
+def add_paper_trade_from_setup(setup_row, paper_df: pd.DataFrame):
+    symbol = str(setup_row["symbol"])
+    existing_open = paper_df[
+        (paper_df["symbol"].astype(str) == symbol)
+        & (paper_df["status"].astype(str) == "OPEN")
+    ]
+    if not existing_open.empty:
+        return paper_df, False
+
+    new_row = {
+        "symbol": symbol,
+        "time": str(setup_row["time"]),
+        "entry": setup_row["entry"],
+        "stop_loss": setup_row["stop_loss"],
+        "take_profit_1": setup_row["take_profit_1"],
+        "take_profit_2": setup_row["take_profit_2"],
+        "shares": setup_row["shares"],
+        "score": setup_row["score"],
+        "status": "OPEN",
+        "pnl": "",
+        "exit_price": "",
+        "exit_reason": "",
+    }
+    updated_paper = pd.concat([paper_df, pd.DataFrame([new_row])], ignore_index=True)
+    return updated_paper, True
+
+
 def ask_mashgpt(prompt: str, signals_df: pd.DataFrame, open_trades_df: pd.DataFrame, closed_trades_df: pd.DataFrame):
     if not client:
         return "OpenAI key is not connected."
@@ -564,6 +591,7 @@ save_paper_trades(paper)
 open_trades = paper[paper["status"].astype(str) == "OPEN"].copy()
 closed_trades = paper[paper["status"].astype(str) == "CLOSED"].copy()
 paper_pnl = pd.to_numeric(closed_trades["pnl"], errors="coerce").fillna(0).sum()
+st.session_state.open_trades = open_trades.to_dict("records")
 
 performance = create_paper_performance_curve(closed_trades)
 win_rate = round((performance["pnl"] > 0).mean() * 100, 2) if not closed_trades.empty else 0.0
@@ -753,6 +781,28 @@ elif page == "Setups":
             bottom_metrics[1].metric("TP2", f'{float(setup["take_profit_2"]):.4f}')
             bottom_metrics[2].metric("Change %", f'{float(setup["change_pct"]):.2f}%')
             bottom_metrics[3].metric("Signal", str(setup["signal"]))
+
+            open_symbols = {str(trade.get("symbol", "")) for trade in st.session_state.open_trades}
+            if str(setup["symbol"]) in open_symbols:
+                st.caption("Already open in Paper Trades")
+            elif st.button("Take Trade", key=f'take-trade-{setup["symbol"]}', use_container_width=True):
+                paper, added = add_paper_trade_from_setup(setup, paper)
+                if added:
+                    session_trade = {
+                        "symbol": str(setup["symbol"]),
+                        "entry": setup["entry"],
+                        "stop_loss": setup["stop_loss"],
+                        "take_profit_1": setup["take_profit_1"],
+                        "take_profit_2": setup["take_profit_2"],
+                        "shares": setup["shares"],
+                        "signal": str(setup["signal"]),
+                        "status": "OPEN",
+                    }
+                    st.session_state.open_trades.append(session_trade)
+                    save_paper_trades(paper)
+                    st.success("Trade added to Paper Trades")
+                else:
+                    st.info("Trade already open")
 
             st.markdown("")
 
