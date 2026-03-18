@@ -603,13 +603,24 @@ elif page == "MashGPT":
         with st.chat_message("assistant", avatar="🤖"):
             recent_times = st.session_state.response_times
             estimated_time = sum(recent_times) / len(recent_times) if recent_times else 4.0
+            thinking_placeholder = st.empty()
             status_placeholder = st.empty()
             status_placeholder.caption(f"Estimated time remaining: {estimated_time:.1f}s")
+            thinking_messages = [
+                "Analyzing price action...",
+                "Checking volume...",
+                "Evaluating setup quality...",
+                "Calculating risk/reward...",
+            ]
+            for message in thinking_messages:
+                thinking_placeholder.caption(message)
+                time.sleep(0.5)
             start_time = time.time()
             with st.spinner("MashGPT is analyzing the market..."):
                 reply = ask_mashgpt(prompt, signals, open_trades, closed_trades)
             duration = time.time() - start_time
             st.session_state.response_times = (recent_times + [duration])[-5:]
+            thinking_placeholder.empty()
             status_placeholder.caption(f"Done in {duration:.2f}s")
             st.write(reply)
 
