@@ -996,8 +996,8 @@ total_pnl = round(float(performance["pnl"].sum()), 2)
 
 
 page = st.sidebar.radio(
-    "Navigate",
-    ["Command Center", "Dashboard", "Performance", "Setups", "Live Signals", "Paper Trades", "MashGPT", "Live Market", "About"],
+    "Workspace",
+    ["Command Center", "Setups", "Performance", "Live Market", "MashGPT", "About"],
 )
 
 st.sidebar.markdown("---")
@@ -1057,8 +1057,8 @@ m4.metric("Live Setups", int(signals["signal"].astype(str).isin(["LONG SETUP", "
 if page == "Command Center":
     render_page_header(
         "Command Center",
-        "Your product home screen for top opportunities, trading mode, open risk, and recent market activity.",
-        "Control Room",
+        "Your home screen for top opportunities, open risk, performance health, and recent market activity.",
+        "Home",
     )
 
     if not signals.empty:
@@ -1148,6 +1148,41 @@ if page == "Command Center":
                 st.markdown(f"- {item}")
         else:
             st.caption("No recent activity yet.")
+
+    st.markdown("### Performance Snapshot")
+    chart_left, chart_right = st.columns(2)
+
+    with chart_left:
+        fig_cc_equity, ax_cc_equity = plt.subplots(figsize=(10.5, 4.4), facecolor="#0f172a")
+        ax_cc_equity.plot(performance["trade_num"], performance["equity"], linewidth=2.8, color="#38bdf8")
+        ax_cc_equity.fill_between(
+            performance["trade_num"],
+            performance["equity"],
+            performance["equity"].min(),
+            color="#38bdf8",
+            alpha=0.12,
+        )
+        style_dashboard_chart(ax_cc_equity, "Paper Equity Curve", "Trade Number", "Account Value")
+        fig_cc_equity.tight_layout(pad=1.2)
+        st.pyplot(fig_cc_equity)
+
+    with chart_right:
+        fig_cc_drawdown, ax_cc_drawdown = plt.subplots(figsize=(10.5, 4.4), facecolor="#0f172a")
+        ax_cc_drawdown.plot(performance["trade_num"], performance["drawdown"], linewidth=2.8, color="#f97316")
+        ax_cc_drawdown.fill_between(
+            performance["trade_num"],
+            performance["drawdown"],
+            0,
+            color="#f97316",
+            alpha=0.14,
+        )
+        style_dashboard_chart(ax_cc_drawdown, "Drawdown Profile", "Trade Number", "Drawdown ($)")
+        fig_cc_drawdown.tight_layout(pad=1.2)
+        st.pyplot(fig_cc_drawdown)
+
+    activity_col1, activity_col2 = st.columns(2)
+    activity_col1.metric("New Logged This Refresh", new_logged)
+    activity_col2.metric("Closed This Refresh", newly_closed)
 
 elif page == "Dashboard":
     render_page_header(
