@@ -375,12 +375,21 @@ Closed paper trades:
 {closed_trades_text}
 
 Rules:
-- Be practical and concise.
+- Be practical, concise, and trader-focused.
 - Do not guarantee profits.
 - For trading questions, explain reasoning clearly.
+- Always structure the answer with these exact sections in this order:
+  Verdict: TAKE, WATCH, or AVOID
+  Why:
+  - bullet points only
+  Risk:
+  - concise bullet points only
+  Confidence: X/10
+- Keep the answer sharp and short. No fluff.
+- If live signals exist, reference the strongest relevant live signal and include entry, stop, TP1, TP2, and score when available.
+- If there are no live signals, say that clearly and give general market/trade management advice instead of inventing a setup.
 - If asked for the best setup, choose the strongest current signal.
 - If asked to rate a setup, give a confidence score from 1 to 10.
-- Mention entry, stop, TP1, TP2, and score when available.
 - For "should I take this trade", give pros and risks, not certainty.
 - For "why did this trigger", explain the likely signal factors.
 """
