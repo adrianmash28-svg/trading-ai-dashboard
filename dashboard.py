@@ -53,31 +53,17 @@ def get_openai_client():
 client = get_openai_client()
 
 
-def get_smtp_settings(sender: str):
-    domain = sender.split("@")[-1].lower() if "@" in sender else ""
-    if domain in {"gmail.com", "googlemail.com"}:
-        return "smtp.gmail.com", 587
-    if domain in {"outlook.com", "hotmail.com", "live.com", "office365.com"}:
-        return "smtp.office365.com", 587
-    if domain in {"yahoo.com", "ymail.com"}:
-        return "smtp.mail.yahoo.com", 587
-    if domain in {"icloud.com", "me.com", "mac.com"}:
-        return "smtp.mail.me.com", 587
-    return "smtp.gmail.com", 587
-
-
 def send_sms_alert(message: str):
     if not all([EMAIL_SENDER, EMAIL_PASSWORD]):
         return False, "Missing email SMS credentials"
     try:
-        smtp_host, smtp_port = get_smtp_settings(EMAIL_SENDER)
         email_message = EmailMessage()
         email_message["From"] = EMAIL_SENDER
         email_message["To"] = VERIZON_SMS_GATEWAY
         email_message["Subject"] = "MashGPT Alert"
         email_message.set_content(str(message).strip()[:160])
 
-        with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as server:
+        with smtplib.SMTP("smtp.gmail.com", 587, timeout=10) as server:
             server.starttls()
             server.login(EMAIL_SENDER, EMAIL_PASSWORD)
             server.send_message(email_message)
