@@ -134,6 +134,7 @@ def ensure_paper_trades_file():
         "pnl",
         "exit_price",
         "exit_reason",
+        "close_time",
     ]
     if not os.path.exists(PAPER_TRADES_FILE):
         pd.DataFrame(columns=cols).to_csv(PAPER_TRADES_FILE, index=False)
@@ -279,6 +280,7 @@ def log_active_signals(signals: pd.DataFrame, paper: pd.DataFrame):
             "pnl": "",
             "exit_price": "",
             "exit_reason": "",
+            "close_time": "",
         }
         paper = pd.concat([paper, pd.DataFrame([new_row])], ignore_index=True)
         added += 1
@@ -301,23 +303,31 @@ def update_open_trades(paper: pd.DataFrame):
         last_price = float(df["Close"].iloc[-1])
         entry = float(trade["entry"])
         stop_loss = float(trade["stop_loss"])
+        tp1 = float(trade["take_profit_1"])
         tp2 = float(trade["take_profit_2"])
         shares = float(trade["shares"])
 
         if last_price >= stop_loss:
             exit_price = stop_loss
             reason = "STOP LOSS"
+            status = "CLOSED LOSS"
         elif last_price <= tp2:
             exit_price = tp2
             reason = "TAKE PROFIT 2"
+            status = "CLOSED WIN"
+        elif last_price <= tp1:
+            exit_price = tp1
+            reason = "TAKE PROFIT 1"
+            status = "CLOSED WIN"
         else:
             continue
 
         pnl = round((entry - exit_price) * shares, 2)
-        paper.at[idx, "status"] = "CLOSED"
+        paper.at[idx, "status"] = status
         paper.at[idx, "pnl"] = pnl
         paper.at[idx, "exit_price"] = exit_price
         paper.at[idx, "exit_reason"] = reason
+        paper.at[idx, "close_time"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         closed_now += 1
 
     return paper, closed_now
@@ -372,6 +382,7 @@ def add_paper_trade_from_setup(setup_row, paper_df: pd.DataFrame):
         "pnl": "",
         "exit_price": "",
         "exit_reason": "",
+        "close_time": "",
     }
     updated_paper = pd.concat([paper_df, pd.DataFrame([new_row])], ignore_index=True)
     return updated_paper, True
@@ -589,7 +600,7 @@ paper, newly_closed = update_open_trades(paper)
 save_paper_trades(paper)
 
 open_trades = paper[paper["status"].astype(str) == "OPEN"].copy()
-closed_trades = paper[paper["status"].astype(str) == "CLOSED"].copy()
+closed_trades = paper[paper["status"].astype(str).str.startswith("CLOSED")].copy()
 paper_pnl = pd.to_numeric(closed_trades["pnl"], errors="coerce").fillna(0).sum()
 st.session_state.open_trades = open_trades.to_dict("records")
 
