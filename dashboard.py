@@ -46,6 +46,7 @@ STRATEGY_REGISTRY_FILE = "strategy_registry.json"
 ALGO_UPDATE_STATE_FILE = "algo_update_state.json"
 STARTING_EQUITY = 10000.0
 RISK_PER_TRADE = 0.01
+MAX_SIMULTANEOUS_TRADES = 3
 APPROVED_EMA_SHORT = [10, 12, 20]
 APPROVED_EMA_LONG = [34, 50, 60]
 APPROVED_SCORE_THRESHOLDS = [60, 65, 70, 75]
@@ -1445,8 +1446,14 @@ def log_active_signals(signals: pd.DataFrame, paper: pd.DataFrame):
     if active.empty:
         return paper, 0
 
+    current_open_count = int((paper["status"].astype(str) == "OPEN").sum())
+    if current_open_count >= MAX_SIMULTANEOUS_TRADES:
+        return paper, 0
+
     added = 0
     for _, row in active.iterrows():
+        if current_open_count >= MAX_SIMULTANEOUS_TRADES:
+            break
         existing = paper[
             (paper["symbol"].astype(str) == str(row["symbol"]))
             & (paper["status"].astype(str) == "OPEN")
@@ -1486,6 +1493,7 @@ def log_active_signals(signals: pd.DataFrame, paper: pd.DataFrame):
         paper = pd.concat([paper, pd.DataFrame([new_row])], ignore_index=True)
         send_sms_alert(f"🚀 TRADE OPEN: {row['symbol']} @ {float(row['entry']):.2f}")
         added += 1
+        current_open_count += 1
 
     return paper, added
 
@@ -1587,6 +1595,10 @@ def get_setup_verdict(score: float) -> str:
 
 def add_paper_trade_from_setup(setup_row, paper_df: pd.DataFrame):
     symbol = str(setup_row["symbol"])
+    current_open_count = int((paper_df["status"].astype(str) == "OPEN").sum())
+    if current_open_count >= MAX_SIMULTANEOUS_TRADES:
+        return paper_df, False
+
     existing_open = paper_df[
         (paper_df["symbol"].astype(str) == symbol)
         & (paper_df["status"].astype(str) == "OPEN")
