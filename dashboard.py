@@ -1377,6 +1377,92 @@ def render_page_header(title: str, subtitle: str, eyebrow: str = "Workspace"):
     )
 
 
+def render_strategy_lab_section(strategy_registry):
+    if not strategy_registry["champion"].get("results_summary"):
+        _, champion_summary, _ = run_validation_split(BACKTEST_SYMBOLS, strategy_registry["champion"]["parameters"])
+        strategy_registry["champion"]["results_summary"] = champion_summary
+        save_strategy_registry(strategy_registry)
+
+    champion = strategy_registry["champion"]
+    challenger = strategy_registry.get("challenger")
+    champion_summary = champion.get("results_summary", {})
+    next_research_run = get_next_research_run(strategy_registry)
+    status_left, status_right, status_third = st.columns(3)
+    status_left.metric(
+        "Last Challenger Run",
+        format_strategy_timestamp(strategy_registry.get("last_research_run", "")),
+    )
+    status_right.metric(
+        "Next Estimated Run",
+        next_research_run.strftime("%b %d, %Y %-I:%M %p"),
+    )
+    status_third.metric(
+        "Last Result",
+        strategy_registry.get("last_challenger_result", "Not yet run") or "Not yet run",
+    )
+    st.caption(f"Controlled research loop cadence: every {RESEARCH_LOOP_HOURS} hours on app activity.")
+
+    if strategy_registry.get("previous_champion") and st.button("Rollback to Previous Champion", key="rollback-champion-inline", use_container_width=True):
+        strategy_registry, rolled_back = rollback_champion(strategy_registry)
+        if rolled_back:
+            st.success("Previous champion restored")
+            st.rerun()
+
+    champ_col, chall_col = st.columns(2)
+    with champ_col:
+        st.markdown("### Current Champion")
+        st.markdown(
+            f"""
+            <div class="top-trade-banner" style="border-color: rgba(56, 189, 248, 0.55);">
+                <div class="top-trade-kicker">Live Strategy</div>
+                <div class="top-trade-value">{strategy_to_label(champion)}</div>
+                <div class="app-subtitle" style="margin-top: 0.5rem;">{champion.get("promotion_status", "Live champion")}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.caption(f"Promotion date: {format_strategy_timestamp(champion.get('promotion_date', ''))}")
+
+    with chall_col:
+        st.markdown("### Challenger Status")
+        if challenger:
+            st.markdown(
+                f"""
+                <div class="top-trade-banner" style="border-color: rgba(251, 191, 36, 0.55);">
+                    <div class="top-trade-kicker">Experimental Candidate</div>
+                    <div class="top-trade-value">{strategy_to_label(challenger)}</div>
+                    <div class="app-subtitle" style="margin-top: 0.5rem;">{challenger.get("promotion_status", "Under review")}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            st.caption(f"Recorded: {format_strategy_timestamp(challenger.get('created_at', ''))}")
+        else:
+            st.info("No active challenger is currently under review.")
+
+    st.markdown("### Latest Experiments")
+    experiments = strategy_registry.get("experiments", [])
+    if experiments:
+        experiment_rows = []
+        for exp in reversed(experiments[-8:]):
+            summary = exp.get("results_summary", {})
+            experiment_rows.append(
+                {
+                    "changed_at": format_strategy_timestamp(exp.get("created_at", "")),
+                    "promotion_date": format_strategy_timestamp(exp.get("promotion_date", "")),
+                    "strategy": strategy_to_label(exp),
+                    "status": exp.get("promotion_status", ""),
+                    "trades": summary.get("num_trades", 0),
+                    "pnl": summary.get("total_pnl", 0.0),
+                    "win_rate": summary.get("win_rate", 0.0),
+                    "max_drawdown": summary.get("max_drawdown", 0.0),
+                }
+            )
+        st.dataframe(pd.DataFrame(experiment_rows), width="stretch", height=260)
+    else:
+        st.caption("No experiments logged yet.")
+
+
 def ask_mashgpt(prompt: str, signals_df: pd.DataFrame, open_trades_df: pd.DataFrame, closed_trades_df: pd.DataFrame):
     if not client:
         return "OpenAI key is not connected."
@@ -1834,7 +1920,7 @@ total_pnl = round(float(performance["pnl"].sum()), 2)
 
 page = st.sidebar.radio(
     "Workspace",
-    ["Command Center", "Trades", "Performance", "Strategy Lab", "Live Market", "MashGPT", "About"],
+    ["Command Center", "Performance", "Market", "About"],
 )
 
 st.sidebar.markdown("---")
@@ -1851,7 +1937,7 @@ st.sidebar.markdown(
             <div class="sidebar-info-value">{', '.join(symbols)}</div>
         </div>
         <div class="sidebar-info-row">
-            <div class="sidebar-info-label">Live Setups</div>
+            <div class="sidebar-info-label">Active Opps</div>
             <div class="sidebar-info-value">{int(signals["signal"].astype(str).isin(["LONG SETUP", "SHORT SETUP"]).sum()) if not signals.empty else 0}</div>
         </div>
         <div class="sidebar-info-row">
@@ -1884,76 +1970,97 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-m1, m2, m3, m4 = st.columns(4)
-m1.metric("Paper Win Rate %", win_rate)
-m2.metric("Paper P&L", f"${total_pnl}")
-m3.metric("Open Paper Trades", int(len(open_trades)))
-m4.metric("Live Setups", int(signals["signal"].astype(str).isin(["LONG SETUP", "SHORT SETUP"]).sum()) if not signals.empty else 0)
-
 
 if page == "Command Center":
     render_page_header(
         "Command Center",
-        "Your home screen for top opportunities, open risk, performance health, and recent market activity.",
+        "A focused overview of performance, open risk, active opportunities, and algorithm status.",
         "Home",
     )
-
-    if not signals.empty:
-        top_setup = signals.sort_values("score", ascending=False).iloc[0]
-        st.markdown(
-            f"""
-            <div class="top-trade-banner">
-                <div class="top-trade-kicker">Top Setup Right Now</div>
-                <div class="top-trade-grid">
-                    <div class="top-trade-item">
-                        <div class="top-trade-label">Symbol</div>
-                        <div class="top-trade-value">{top_setup["symbol"]}</div>
-                    </div>
-                    <div class="top-trade-item">
-                        <div class="top-trade-label">Score</div>
-                        <div class="top-trade-value">{int(top_setup["score"])}</div>
-                    </div>
-                    <div class="top-trade-item">
-                        <div class="top-trade-label">Entry</div>
-                        <div class="top-trade-value">{top_setup["entry"]}</div>
-                    </div>
-                    <div class="top-trade-item">
-                        <div class="top-trade-label">Stop</div>
-                        <div class="top-trade-value">{top_setup["stop_loss"]}</div>
-                    </div>
-                    <div class="top-trade-item">
-                        <div class="top-trade-label">TP1</div>
-                        <div class="top-trade-value">{top_setup["take_profit_1"]}</div>
-                    </div>
-                    <div class="top-trade-item">
-                        <div class="top-trade-label">TP2</div>
-                        <div class="top-trade-value">{top_setup["take_profit_2"]}</div>
-                    </div>
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-    else:
-        st.info("No live setup available right now.")
+    st.markdown(
+        """
+        <div class="top-trade-banner" style="border-color: rgba(56, 189, 248, 0.42);">
+            <div class="top-trade-kicker">Primary Dashboard</div>
+            <div class="app-subtitle">Review active opportunities, monitor open risk, and check algorithm health in one concise workspace.</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     cc1, cc2, cc3, cc4 = st.columns(4)
-    cc1.metric("Trading Mode", trading_mode)
-    cc2.metric("Open Trades", int(len(open_trades)))
-    cc3.metric("Live Setups", int(signals["signal"].astype(str).isin(["LONG SETUP", "SHORT SETUP"]).sum()) if not signals.empty else 0)
-    cc4.metric("Paper P&L", f"${round(float(paper_pnl), 2)}")
+    cc1.metric("P&L", f"${round(float(paper_pnl), 2):,.2f}")
+    cc2.metric("Win Rate", f"{win_rate:.2f}%")
+    cc3.metric("Open Trades", int(len(open_trades)))
+    cc4.metric("Active Setups", int(signals["signal"].astype(str).isin(["LONG SETUP", "SHORT SETUP"]).sum()) if not signals.empty else 0)
 
-    left_col, right_col = st.columns([1.15, 0.85])
+    st.markdown("### Active Opportunities")
+    if signals.empty:
+        st.caption("No active opportunities right now.")
+    else:
+        active_opportunities = signals.sort_values("score", ascending=False).head(3).reset_index(drop=True)
+        for _, setup in active_opportunities.iterrows():
+            score = int(setup["score"])
+            setup_verdict = get_setup_verdict(score)
+            verdict_class = setup_verdict.lower()
+            st.markdown(
+                f"""
+                <div class="setup-card {verdict_class}">
+                    <div class="setup-card-header">
+                        <div>
+                            <div class="setup-symbol">{setup["symbol"]}</div>
+                            <div class="setup-signal">{setup["signal"]}</div>
+                        </div>
+                        <div class="setup-badge {verdict_class}">{setup_verdict}</div>
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            top_metrics = st.columns(4)
+            top_metrics[0].metric("Score", score)
+            top_metrics[1].metric("Entry", f'{float(setup["entry"]):.4f}')
+            top_metrics[2].metric("Stop", f'{float(setup["stop_loss"]):.4f}')
+            top_metrics[3].metric("Rel Vol", f'{float(setup["rel_vol"]):.2f}x')
 
-    with left_col:
-        st.markdown("### Open Paper Trades")
-        if open_trades.empty:
-            st.caption("No open paper trades.")
-        else:
-            open_summary = open_trades[["symbol", "entry", "stop_loss", "take_profit_1", "take_profit_2"]].copy()
-            st.dataframe(open_summary, width="stretch", height=240)
+            bottom_metrics = st.columns(4)
+            bottom_metrics[0].metric("TP1", f'{float(setup["take_profit_1"]):.4f}')
+            bottom_metrics[1].metric("TP2", f'{float(setup["take_profit_2"]):.4f}')
+            bottom_metrics[2].metric("Change %", f'{float(setup["change_pct"]):.2f}%')
+            bottom_metrics[3].metric("Signal", str(setup["signal"]))
 
-        st.markdown("### Quick Prompt")
+            open_symbols = {str(trade.get("symbol", "")) for trade in st.session_state.open_trades}
+            if str(setup["symbol"]) in open_symbols:
+                st.caption("Already open in Paper Trades")
+            elif st.button("Take Trade", key=f'command-center-take-{setup["symbol"]}', use_container_width=True):
+                paper, added = add_paper_trade_from_setup(setup, paper)
+                if added:
+                    st.session_state.open_trades.append(
+                        {
+                            "symbol": str(setup["symbol"]),
+                            "entry": setup["entry"],
+                            "stop_loss": setup["stop_loss"],
+                            "take_profit_1": setup["take_profit_1"],
+                            "take_profit_2": setup["take_profit_2"],
+                            "shares": setup["shares"],
+                            "signal": str(setup["signal"]),
+                            "status": "OPEN",
+                        }
+                    )
+                    save_paper_trades(paper)
+                    st.success("Trade added to Paper Trades")
+                else:
+                    st.info("Trade already open")
+
+    st.markdown("### Open Trades")
+    if open_trades.empty:
+        st.caption("No open paper trades.")
+    else:
+        open_summary = open_trades[["symbol", "signal", "entry", "stop_loss", "take_profit_1", "take_profit_2"]].copy()
+        st.dataframe(open_summary, width="stretch", height=220)
+
+    lower_left, lower_right = st.columns([1.05, 0.95])
+    with lower_left:
+        st.markdown("### Market Intelligence")
         quick_prompt = st.text_input(
             "Ask MashGPT from Command Center",
             key="command_center_prompt",
@@ -1965,34 +2072,14 @@ if page == "Command Center":
         if st.session_state.get("command_center_reply"):
             st.info(st.session_state["command_center_reply"])
 
-    with right_col:
-        st.markdown("### Recent Activity")
-        recent_items = []
-        if new_logged:
-            recent_items.append(f"{new_logged} new trade(s) opened this refresh")
-        if newly_closed:
-            recent_items.append(f"{newly_closed} trade(s) closed this refresh")
-        if not closed_trades.empty:
-            last_closed = closed_trades.iloc[-1]
-            recent_items.append(
-                f"Last closed: {last_closed['symbol']} {last_closed['exit_reason']} ({last_closed['status']})"
-            )
-        if not signals.empty:
-            recent_items.append(f"Active leader: {signals.iloc[0]['symbol']} score {int(signals.iloc[0]['score'])}")
-
-        if recent_items:
-            for item in recent_items[:4]:
-                st.markdown(f"- {item}")
-        else:
-            st.caption("No recent activity yet.")
-
+    with lower_right:
         st.markdown("### Algo Status")
         algo_state = algo_update_info.get("state", {})
         next_slot = algo_update_info.get("next_slot")
-        st.caption(f"Last update sent: {algo_state.get('last_sent_at', '') or 'Not yet sent'}")
-        st.caption(f"Strategy signature: {algo_update_info.get('signature_hash', 'n/a')}")
+        st.caption(f"Last update: {algo_state.get('last_sent_at', '') or 'Not yet sent'}")
+        st.caption(f"Signature: {algo_update_info.get('signature_hash', 'n/a')}")
         st.caption(
-            "Next scheduled update: "
+            "Next update: "
             + (next_slot.strftime("%Y-%m-%d %I:%M %p %Z") if next_slot else "Unavailable")
         )
         if algo_state.get("last_message"):
@@ -2007,41 +2094,6 @@ if page == "Command Center":
                 st.success("Sample algo update sent")
             else:
                 st.error(f"Sample algo update could not be sent{f': {sample_error}' if sample_error else ''}")
-
-    st.markdown("### Performance Snapshot")
-    chart_left, chart_right = st.columns(2)
-
-    with chart_left:
-        fig_cc_equity, ax_cc_equity = plt.subplots(figsize=(10.5, 4.4), facecolor="#0f172a")
-        ax_cc_equity.plot(performance["trade_num"], performance["equity"], linewidth=2.8, color="#38bdf8")
-        ax_cc_equity.fill_between(
-            performance["trade_num"],
-            performance["equity"],
-            performance["equity"].min(),
-            color="#38bdf8",
-            alpha=0.12,
-        )
-        style_dashboard_chart(ax_cc_equity, "Paper Equity Curve", "Trade Number", "Account Value")
-        fig_cc_equity.tight_layout(pad=1.2)
-        st.pyplot(fig_cc_equity)
-
-    with chart_right:
-        fig_cc_drawdown, ax_cc_drawdown = plt.subplots(figsize=(10.5, 4.4), facecolor="#0f172a")
-        ax_cc_drawdown.plot(performance["trade_num"], performance["drawdown"], linewidth=2.8, color="#f97316")
-        ax_cc_drawdown.fill_between(
-            performance["trade_num"],
-            performance["drawdown"],
-            0,
-            color="#f97316",
-            alpha=0.14,
-        )
-        style_dashboard_chart(ax_cc_drawdown, "Drawdown Profile", "Trade Number", "Drawdown ($)")
-        fig_cc_drawdown.tight_layout(pad=1.2)
-        st.pyplot(fig_cc_drawdown)
-
-    activity_col1, activity_col2 = st.columns(2)
-    activity_col1.metric("New Logged This Refresh", new_logged)
-    activity_col2.metric("Closed This Refresh", newly_closed)
 
 elif page == "Dashboard":
     render_page_header(
@@ -2126,8 +2178,8 @@ elif page == "Dashboard":
 elif page == "Performance":
     render_page_header(
         "Performance",
-        "Validate the current strategy with historical simulations built from the same signal engine used in the live scanner.",
-        "Strategy Lab",
+        "Review the current strategy with a concise set of metrics and charts, then open Strategy Lab when you need deeper research controls.",
+        "Analytics",
     )
 
     champion_params = strategy_registry["champion"]["parameters"]
@@ -2159,13 +2211,11 @@ elif page == "Performance":
             unsafe_allow_html=True,
         )
     else:
-        p1, p2, p3, p4, p5, p6 = st.columns(6)
+        p1, p2, p3, p4 = st.columns(4)
         p1.metric("Total P&L", f"${backtest_summary['total_pnl']:,.2f}")
         p2.metric("Win Rate", f"{backtest_summary['win_rate']:.2f}%")
         p3.metric("Trades", backtest_summary["num_trades"])
-        p4.metric("Average Win", f"${backtest_summary['average_win']:,.2f}")
-        p5.metric("Average Loss", f"${backtest_summary['average_loss']:,.2f}")
-        p6.metric("Max Drawdown", f"${backtest_summary['max_drawdown']:,.2f}")
+        p4.metric("Max Drawdown", f"${backtest_summary['max_drawdown']:,.2f}")
 
         chart_col1, chart_col2 = st.columns(2)
 
@@ -2184,179 +2234,24 @@ elif page == "Performance":
             st.pyplot(fig_perf)
 
         with chart_col2:
-            fig_pnl, ax_pnl = plt.subplots(figsize=(10.5, 4.8), facecolor="#0f172a")
-            pnl_colors = ["#22c55e" if pnl >= 0 else "#ef4444" for pnl in backtest_trades["pnl"]]
-            ax_pnl.bar(backtest_curve["trade_num"], backtest_trades["pnl"], color=pnl_colors, width=0.65)
-            style_dashboard_chart(ax_pnl, "Backtest P&L Per Trade", "Trade Number", "P&L ($)")
-            ax_pnl.axhline(0, color="#64748b", linewidth=1.0, alpha=0.8)
-            fig_pnl.tight_layout(pad=1.2)
-            st.pyplot(fig_pnl)
+            fig_dd, ax_dd = plt.subplots(figsize=(10.5, 4.8), facecolor="#0f172a")
+            ax_dd.plot(backtest_curve["trade_num"], backtest_curve["drawdown"], linewidth=2.8, color="#f97316")
+            ax_dd.fill_between(
+                backtest_curve["trade_num"],
+                backtest_curve["drawdown"],
+                0,
+                color="#f97316",
+                alpha=0.14,
+            )
+            style_dashboard_chart(ax_dd, "Backtest Drawdown", "Trade Number", "Drawdown ($)")
+            fig_dd.tight_layout(pad=1.2)
+            st.pyplot(fig_dd)
 
-        fig_outcomes, ax_outcomes = plt.subplots(figsize=(10.5, 3.8), facecolor="#0f172a")
-        outcome_counts = pd.Series(
-            {
-                "Wins": int((backtest_trades["pnl"] > 0).sum()),
-                "Losses": int((backtest_trades["pnl"] < 0).sum()),
-            }
-        )
-        ax_outcomes.bar(outcome_counts.index, outcome_counts.values, color=["#22c55e", "#ef4444"], width=0.55)
-        style_dashboard_chart(ax_outcomes, "Backtest Win vs Loss", "Outcome", "Trades")
-        fig_outcomes.tight_layout(pad=1.2)
-        st.pyplot(fig_outcomes)
-
-        st.markdown("### Simulated Trade Log")
-        journal_columns = [
-            "symbol",
-            "signal",
-            "entry_time",
-            "close_time",
-            "entry",
-            "exit_price",
-            "shares",
-            "status",
-            "exit_reason",
-            "pnl",
-            "score",
-        ]
-        available_journal_columns = [col for col in journal_columns if col in backtest_trades.columns]
-        st.dataframe(
-            backtest_trades[available_journal_columns].copy(),
-            width="stretch",
-            height=340,
-        )
+    with st.expander("Strategy Lab", expanded=False):
+        render_strategy_lab_section(strategy_registry)
 
 elif page == "Strategy Lab":
-    render_page_header(
-        "Strategy Lab",
-        "A conservative champion-vs-challenger workflow that tests only approved parameter variations before any strategy can be promoted.",
-        "Research Engine",
-    )
-
-    if not strategy_registry["champion"].get("results_summary"):
-        _, champion_summary, _ = run_validation_split(BACKTEST_SYMBOLS, strategy_registry["champion"]["parameters"])
-        strategy_registry["champion"]["results_summary"] = champion_summary
-        save_strategy_registry(strategy_registry)
-
-    champion = strategy_registry["champion"]
-    challenger = strategy_registry.get("challenger")
-    champion_summary = champion.get("results_summary", {})
-    next_research_run = get_next_research_run(strategy_registry)
-    status_left, status_right, status_third = st.columns(3)
-    status_left.metric(
-        "Last Challenger Run",
-        format_strategy_timestamp(strategy_registry.get("last_research_run", "")),
-    )
-    status_right.metric(
-        "Next Estimated Run",
-        next_research_run.strftime("%b %d, %Y %-I:%M %p"),
-    )
-    status_third.metric(
-        "Last Result",
-        strategy_registry.get("last_challenger_result", "Not yet run") or "Not yet run",
-    )
-    st.caption(
-        f"Controlled research loop cadence: every {RESEARCH_LOOP_HOURS} hours on app activity."
-    )
-
-    if strategy_registry.get("previous_champion") and st.button("Rollback to Previous Champion", use_container_width=True):
-        strategy_registry, rolled_back = rollback_champion(strategy_registry)
-        if rolled_back:
-            st.success("Previous champion restored")
-            st.rerun()
-
-    champ_col, chall_col = st.columns(2)
-    with champ_col:
-        st.markdown("### Current Champion")
-        st.markdown(
-            f"""
-            <div class="top-trade-banner" style="border-color: rgba(56, 189, 248, 0.55);">
-                <div class="top-trade-kicker">Live Strategy</div>
-                <div class="top-trade-value">{strategy_to_label(champion)}</div>
-                <div class="app-subtitle" style="margin-top: 0.5rem;">{champion.get("promotion_status", "Live champion")}</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-        st.caption(f"Promotion date: {format_strategy_timestamp(champion.get('promotion_date', ''))}")
-        st.json(champion["parameters"], expanded=False)
-
-    with chall_col:
-        st.markdown("### Active Challenger")
-        if challenger:
-            st.markdown(
-                f"""
-                <div class="top-trade-banner" style="border-color: rgba(251, 191, 36, 0.55);">
-                    <div class="top-trade-kicker">Experimental Candidate</div>
-                    <div class="top-trade-value">{strategy_to_label(challenger)}</div>
-                    <div class="app-subtitle" style="margin-top: 0.5rem;">{challenger.get("promotion_status", "Under review")}</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-            st.caption(f"Recorded: {format_strategy_timestamp(challenger.get('created_at', ''))}")
-            st.json(challenger["parameters"], expanded=False)
-        else:
-            st.info("No active challenger has cleared the research gates yet.")
-
-    st.markdown("### Promotion Status")
-    if challenger:
-        challenger_summary = challenger.get("results_summary", {})
-        check_rows = challenger.get("promotion_checks", [])
-        promotion_checks = pd.DataFrame(
-            [
-                {
-                    "check": check.get("check", ""),
-                    "status": "Pass" if check.get("passed") else "Fail",
-                    "detail": check.get("detail", ""),
-                }
-                for check in check_rows
-            ]
-        )
-        st.dataframe(promotion_checks, width="stretch", height=245)
-        failed_checks = [row["check"] for row in check_rows if not row.get("passed")]
-        if failed_checks:
-            st.caption(f"Why it failed: {', '.join(failed_checks)}")
-        else:
-            st.caption("Challenger passed the current promotion rules.")
-
-        compare_left, compare_right = st.columns(2)
-        with compare_left:
-            st.markdown("#### Champion Metrics")
-            c1, c2, c3 = st.columns(3)
-            c1.metric("P&L", f"${champion_summary.get('total_pnl', 0.0):,.2f}")
-            c2.metric("Win Rate", f"{champion_summary.get('win_rate', 0.0):.2f}%")
-            c3.metric("Max DD", f"${champion_summary.get('max_drawdown', 0.0):,.2f}")
-        with compare_right:
-            st.markdown("#### Challenger Metrics")
-            d1, d2, d3 = st.columns(3)
-            d1.metric("P&L", f"${challenger_summary.get('total_pnl', 0.0):,.2f}")
-            d2.metric("Win Rate", f"{challenger_summary.get('win_rate', 0.0):.2f}%")
-            d3.metric("Max DD", f"${challenger_summary.get('max_drawdown', 0.0):,.2f}")
-    else:
-        st.caption("The research engine is cycling through approved variations and will surface a challenger only if it clears the initial evaluation gates.")
-
-    st.markdown("### Latest Experiments")
-    experiments = strategy_registry.get("experiments", [])
-    if experiments:
-        experiment_rows = []
-        for exp in reversed(experiments[-8:]):
-            summary = exp.get("results_summary", {})
-            experiment_rows.append(
-                {
-                    "changed_at": format_strategy_timestamp(exp.get("created_at", "")),
-                    "promotion_date": format_strategy_timestamp(exp.get("promotion_date", "")),
-                    "strategy": strategy_to_label(exp),
-                    "status": exp.get("promotion_status", ""),
-                    "trades": summary.get("num_trades", 0),
-                    "pnl": summary.get("total_pnl", 0.0),
-                    "win_rate": summary.get("win_rate", 0.0),
-                    "max_drawdown": summary.get("max_drawdown", 0.0),
-                    "out_of_sample_pnl": summary.get("out_of_sample_pnl", 0.0),
-                }
-            )
-        st.dataframe(pd.DataFrame(experiment_rows), width="stretch", height=280)
-    else:
-        st.caption("No experiments logged yet.")
+    st.stop()
 
 elif page == "About":
     render_page_header(
@@ -2898,11 +2793,11 @@ elif page == "MashGPT":
 
         st.session_state.chat_history.append(("assistant", reply))
 
-elif page == "Live Market":
+elif page == "Market":
     render_page_header(
-        "Live Market",
-        "Watch the active symbol in a wider terminal view with quick picks, live stats, and realtime refresh.",
-        "Terminal View",
+        "Market",
+        "Monitor the watchlist, inspect a selected symbol, and open the chart only when you need more detail.",
+        "Watchlist",
     )
     st_autorefresh(interval=5000, key="live_market_refresh")
 
@@ -2913,6 +2808,7 @@ elif page == "Live Market":
     # default timeframe (TradingView will handle UI anyway)
     timeframe = "60"
 
+    st.caption(f"Watchlist: {', '.join(['NVDA', 'AAPL', 'TSLA', 'SPY'])}")
     st.session_state["live_market_symbol"] = selected_symbol
     quick1, quick2, quick3, quick4 = st.columns(4)
     if quick1.button("NVDA", use_container_width=True):
@@ -2945,11 +2841,6 @@ elif page == "Live Market":
         market_name = market_status.get("market", "unknown")
         st.caption(f"Market status: {market_name}")
 
-    st.markdown("---")
-
-    # ---------------- CHART ----------------
-    st.markdown(f"### {selected_symbol} Chart")
-
     tradingview_html = f"""
     <div id="tradingview_chart" style="width:100%; height:720px;"></div>
 
@@ -2975,17 +2866,7 @@ elif page == "Live Market":
       }});
     </script>
     """
-
-    with st.container():
-        components.html(tradingview_html, height=740)
-
-    st.caption("Chart display by TradingView. Live stats use Polygon when available.")
-
-    st.markdown("")
-    st.markdown("")
-
-    # ---------------- STATS ----------------
-    st.markdown("### Stats")
+    st.markdown("### Market Snapshot")
 
     if polygon_trade and polygon_prev:
         latest_close = float(polygon_trade["price"]) if polygon_trade.get("price") is not None else None
@@ -3029,8 +2910,6 @@ elif page == "Live Market":
     else:
         st.warning(f"No data found for {selected_symbol}")
 
-    st.markdown("")
-
-    with st.expander("Show raw market data"):
-        if not market_df.empty:
-            st.dataframe(market_df.tail(100), width="stretch", height=220)
+    with st.expander("Open Chart", expanded=False):
+        components.html(tradingview_html, height=740)
+        st.caption("Chart display by TradingView. Live stats use Polygon when available.")
