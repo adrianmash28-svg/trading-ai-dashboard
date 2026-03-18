@@ -563,10 +563,6 @@ elif page == "MashGPT":
         else:
             verdict = "❌ AVOID"
             reason = "Weak setup, low probability."
-
-        if market_status:
-            market_name = market_status.get("market", "unknown")
-            st.caption(f"Market status: {market_name}")
         
         st.markdown(f"### {verdict}")
         st.write(reason)
