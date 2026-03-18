@@ -601,135 +601,146 @@ elif page == "Live Market":
 
     watchlist = ["AAPL", "NVDA", "META", "MSFT", "TSLA", "AMZN", "SPY", "QQQ"]
 
-    left, right = st.columns([1, 3.2], gap="large")
+    # ---------------- TOP BAR ----------------
+    top1, top2, top3 = st.columns([1.2, 1.2, 1.6])
 
-    with left:
-        st.markdown("### Watchlist")
-
+    with top1:
         default_symbol = st.session_state.get("live_market_symbol", "NVDA")
         default_index = watchlist.index(default_symbol) if default_symbol in watchlist else 0
 
         selected_symbol = st.selectbox(
-            "Select Symbol",
+            "Ticker",
             options=watchlist,
             index=default_index,
         )
 
-        custom_symbol = st.text_input(
-            "Or search ticker",
-            value=default_symbol
-        ).upper().strip()
-
-        if custom_symbol:
-            selected_symbol = custom_symbol
-
-        st.session_state["live_market_symbol"] = selected_symbol
-
+    with top2:
         timeframe = st.selectbox(
             "Timeframe",
             ["1", "5", "15", "30", "60", "D", "W"],
             index=4,
         )
 
-        market_df = fetch_history(
-            selected_symbol,
-            period="6mo" if timeframe in ["D", "W"] else "5d",
-            interval="1d" if timeframe in ["D", "W"] else "15m",
-        )
+    with top3:
+        custom_symbol = st.text_input(
+            "Search ticker",
+            value=selected_symbol,
+        ).upper().strip()
 
-        polygon_trade = get_polygon_last_trade(selected_symbol)
-        polygon_prev = get_polygon_prev_day(selected_symbol)
-        market_status = get_polygon_market_status()
+    if custom_symbol:
+        selected_symbol = custom_symbol
 
-        if polygon_trade and polygon_prev:
-            latest_close = float(polygon_trade["price"]) if polygon_trade.get("price") is not None else None
-            prev_close = float(polygon_prev["close"]) if polygon_prev.get("close") is not None else None
-            high_val = float(polygon_prev["high"]) if polygon_prev.get("high") is not None else None
-            low_val = float(polygon_prev["low"]) if polygon_prev.get("low") is not None else None
-            latest_volume = int(polygon_prev["volume"]) if polygon_prev.get("volume") is not None else None
+    st.session_state["live_market_symbol"] = selected_symbol
 
-            if latest_close is not None and prev_close not in (None, 0):
-                change_pct = ((latest_close - prev_close) / prev_close) * 100
-            else:
-                change_pct = None
+    quick1, quick2, quick3, quick4 = st.columns(4)
+    if quick1.button("NVDA", use_container_width=True):
+        st.session_state["live_market_symbol"] = "NVDA"
+        st.rerun()
+    if quick2.button("AAPL", use_container_width=True):
+        st.session_state["live_market_symbol"] = "AAPL"
+        st.rerun()
+    if quick3.button("TSLA", use_container_width=True):
+        st.session_state["live_market_symbol"] = "TSLA"
+        st.rerun()
+    if quick4.button("SPY", use_container_width=True):
+        st.session_state["live_market_symbol"] = "SPY"
+        st.rerun()
 
-            s1, s2, s3, s4, s5 = st.columns(5)
-            s1.metric("Live Price", f"{latest_close:.2f}" if latest_close is not None else "N/A")
-            s2.metric("Change %", f"{change_pct:.2f}%" if change_pct is not None else "N/A")
-            s3.metric("High", f"{high_val:.2f}" if high_val is not None else "N/A")
-            s4.metric("Low", f"{low_val:.2f}" if low_val is not None else "N/A")
-            s5.metric("Volume", f"{latest_volume:,}" if latest_volume is not None else "N/A")
+    market_df = fetch_history(
+        selected_symbol,
+        period="6mo" if timeframe in ["D", "W"] else "5d",
+        interval="1d" if timeframe in ["D", "W"] else "15m",
+    )
 
-            st.caption("Live price powered by Polygon")
+    polygon_trade = get_polygon_last_trade(selected_symbol)
+    polygon_prev = get_polygon_prev_day(selected_symbol)
+    market_status = get_polygon_market_status()
 
-        elif not market_df.empty:
-            latest_close = float(market_df["Close"].iloc[-1])
-            first_close = float(market_df["Close"].iloc[0])
-            change_pct = ((latest_close - first_close) / first_close) * 100 if first_close != 0 else 0.0
-            latest_volume = int(market_df["Volume"].iloc[-1])
-            high_val = float(market_df["High"].max())
-            low_val = float(market_df["Low"].min())
+    if market_status:
+        market_name = market_status.get("market", "unknown")
+        st.caption(f"Market status: {market_name}")
 
-            s1, s2, s3, s4, s5 = st.columns(5)
-            s1.metric("Last", f"{latest_close:.2f}")
-            s2.metric("Change %", f"{change_pct:.2f}%")
-            s3.metric("High", f"{high_val:.2f}")
-            s4.metric("Low", f"{low_val:.2f}")
-            s5.metric("Volume", f"{latest_volume:,}")
+    st.markdown("---")
 
-            st.caption("Fallback data from yfinance")
+    # ---------------- CHART ----------------
+    st.markdown(f"### {selected_symbol} Chart")
 
+    tradingview_html = f"""
+    <div id="tradingview_chart" style="width:100%; height:950px;"></div>
+
+    <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+    <script type="text/javascript">
+      new TradingView.widget({{
+        "width": "100%",
+        "height": 950,
+        "symbol": "{selected_symbol}",
+        "interval": "{timeframe}",
+        "timezone": "America/Los_Angeles",
+        "theme": "dark",
+        "style": "1",
+        "locale": "en",
+        "toolbar_bg": "#0b1220",
+        "enable_publishing": false,
+        "allow_symbol_change": true,
+        "hide_top_toolbar": false,
+        "hide_legend": false,
+        "save_image": false,
+        "withdateranges": true,
+        "container_id": "tradingview_chart"
+      }});
+    </script>
+    """
+
+    components.html(tradingview_html, height=970)
+
+    st.caption("Chart display by TradingView. Live stats use Polygon when available.")
+
+    st.markdown("---")
+
+    # ---------------- STATS ----------------
+    st.markdown("### Stats")
+
+    if polygon_trade and polygon_prev:
+        latest_close = float(polygon_trade["price"]) if polygon_trade.get("price") is not None else None
+        prev_close = float(polygon_prev["close"]) if polygon_prev.get("close") is not None else None
+        high_val = float(polygon_prev["high"]) if polygon_prev.get("high") is not None else None
+        low_val = float(polygon_prev["low"]) if polygon_prev.get("low") is not None else None
+        latest_volume = int(polygon_prev["volume"]) if polygon_prev.get("volume") is not None else None
+
+        if latest_close is not None and prev_close not in (None, 0):
+            change_pct = ((latest_close - prev_close) / prev_close) * 100
         else:
-            st.warning(f"No data found for {selected_symbol}")
+            change_pct = None
 
-        st.markdown("### Quick Picks")
-        q1, q2 = st.columns(2)
-        if q1.button("NVDA", use_container_width=True):
-            st.session_state["live_market_symbol"] = "NVDA"
-            st.rerun()
-        if q2.button("AAPL", use_container_width=True):
-            st.session_state["live_market_symbol"] = "AAPL"
-            st.rerun()
+        s1, s2, s3, s4, s5 = st.columns(5)
+        s1.metric("Live Price", f"{latest_close:.2f}" if latest_close is not None else "N/A")
+        s2.metric("Change %", f"{change_pct:.2f}%" if change_pct is not None else "N/A")
+        s3.metric("High", f"{high_val:.2f}" if high_val is not None else "N/A")
+        s4.metric("Low", f"{low_val:.2f}" if low_val is not None else "N/A")
+        s5.metric("Volume", f"{latest_volume:,}" if latest_volume is not None else "N/A")
 
-        q3, q4 = st.columns(2)
-        if q3.button("TSLA", use_container_width=True):
-            st.session_state["live_market_symbol"] = "TSLA"
-            st.rerun()
-        if q4.button("SPY", use_container_width=True):
-            st.session_state["live_market_symbol"] = "SPY"
-            st.rerun()
+        st.caption("Live price powered by Polygon")
 
-    with right:
-        st.markdown(f"### {selected_symbol} Chart")
+    elif not market_df.empty:
+        latest_close = float(market_df["Close"].iloc[-1])
+        first_close = float(market_df["Close"].iloc[0])
+        change_pct = ((latest_close - first_close) / first_close) * 100 if first_close != 0 else 0.0
+        latest_volume = int(market_df["Volume"].iloc[-1])
+        high_val = float(market_df["High"].max())
+        low_val = float(market_df["Low"].min())
 
-        tradingview_html = f"""
-        <div id="tradingview_chart" style="width:100%; height:1000px;"></div>
+        s1, s2, s3, s4, s5 = st.columns(5)
+        s1.metric("Last", f"{latest_close:.2f}")
+        s2.metric("Change %", f"{change_pct:.2f}%")
+        s3.metric("High", f"{high_val:.2f}")
+        s4.metric("Low", f"{low_val:.2f}")
+        s5.metric("Volume", f"{latest_volume:,}")
 
-        <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
-        <script type="text/javascript">
-        new TradingView.widget({{
-            "width": "100%",
-            "height": 1000,
-            "symbol": "{selected_symbol}",
-            "interval": "{timeframe}",
-            "timezone": "America/Los_Angeles",
-            "theme": "dark",
-            "style": "1",
-            "locale": "en",
-            "toolbar_bg": "#0b1220",
-            "enable_publishing": false,
-            "allow_symbol_change": true,
-            "hide_top_toolbar": false,
-            "hide_legend": false,
-            "save_image": false,
-            "withdateranges": true,
-            "container_id": "tradingview_chart"
-        }});
-        </script>
-        """
+        st.caption("Fallback data from yfinance")
 
-        components.html(tradingview_html, height=1020)
+    else:
+        st.warning(f"No data found for {selected_symbol}")
 
+    with st.expander("Show raw market data"):
         if not market_df.empty:
-            with st.expander("Show raw market data"):
-                st.dataframe(market_df.tail(100), width="stretch", height=220)
+            st.dataframe(market_df.tail(100), width="stretch", height=220)
