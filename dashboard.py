@@ -480,8 +480,100 @@ st.markdown(
         color: #e8eefc;
     }
     [data-testid="stSidebar"] {
-        background: #0f172a;
+        background: linear-gradient(180deg, #0b1220 0%, #0f172a 100%);
         border-right: 1px solid #1f2a44;
+    }
+    [data-testid="stSidebar"] > div:first-child {
+        padding-top: 0.75rem;
+    }
+    [data-testid="stSidebar"] .stRadio > label {
+        color: #94a3b8;
+        font-size: 0.78rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 0.4rem;
+    }
+    [data-testid="stSidebar"] .stRadio [role="radiogroup"] {
+        gap: 0.35rem;
+    }
+    [data-testid="stSidebar"] .stRadio [role="radio"] {
+        background: rgba(15, 23, 42, 0.72);
+        border: 1px solid rgba(51, 65, 85, 0.9);
+        border-radius: 14px;
+        padding: 0.55rem 0.7rem;
+        transition: all 0.18s ease;
+    }
+    [data-testid="stSidebar"] .stRadio [role="radio"][aria-checked="true"] {
+        background: linear-gradient(135deg, rgba(30, 41, 59, 0.96) 0%, rgba(15, 23, 42, 1) 100%);
+        border-color: rgba(56, 189, 248, 0.65);
+        box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.18);
+    }
+    [data-testid="stSidebar"] .stRadio [role="radio"] label,
+    [data-testid="stSidebar"] .stRadio [role="radio"] div {
+        color: #e2e8f0;
+    }
+    .sidebar-shell {
+        background: linear-gradient(180deg, rgba(15, 23, 42, 0.82) 0%, rgba(15, 23, 42, 0.55) 100%);
+        border: 1px solid rgba(51, 65, 85, 0.65);
+        border-radius: 18px;
+        padding: 0.9rem 1rem 1rem 1rem;
+        margin-bottom: 0.9rem;
+        box-shadow: 0 12px 28px rgba(0, 0, 0, 0.22);
+    }
+    .sidebar-kicker {
+        color: #38bdf8;
+        font-size: 0.74rem;
+        font-weight: 800;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        margin-bottom: 0.4rem;
+    }
+    .sidebar-title {
+        color: #f8fafc;
+        font-size: 1.2rem;
+        font-weight: 800;
+        margin-bottom: 0.2rem;
+    }
+    .sidebar-copy {
+        color: #94a3b8;
+        font-size: 0.9rem;
+        line-height: 1.45;
+    }
+    .sidebar-section-label {
+        color: #94a3b8;
+        font-size: 0.76rem;
+        font-weight: 700;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        margin: 0.2rem 0 0.45rem 0;
+    }
+    .sidebar-info-card {
+        background: rgba(15, 23, 42, 0.74);
+        border: 1px solid rgba(51, 65, 85, 0.75);
+        border-radius: 16px;
+        padding: 0.8rem 0.9rem;
+        margin-top: 0.4rem;
+    }
+    .sidebar-info-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.75rem;
+        margin-bottom: 0.45rem;
+    }
+    .sidebar-info-row:last-child {
+        margin-bottom: 0;
+    }
+    .sidebar-info-label {
+        color: #94a3b8;
+        font-size: 0.84rem;
+    }
+    .sidebar-info-value {
+        color: #f8fafc;
+        font-size: 0.88rem;
+        font-weight: 700;
+        text-align: right;
     }
     div[data-testid="stMetric"] {
         background: #111a2c;
@@ -623,18 +715,42 @@ win_rate = round((performance["pnl"] > 0).mean() * 100, 2) if not closed_trades.
 total_pnl = round(float(performance["pnl"].sum()), 2)
 
 
-st.sidebar.markdown("## Terminal")
-st.sidebar.caption("Trading workspace")
+st.sidebar.markdown(
+    """
+    <div class="sidebar-shell">
+        <div class="sidebar-kicker">Mash Trading</div>
+        <div class="sidebar-title">Terminal</div>
+        <div class="sidebar-copy">Live signals, paper execution, and market monitoring in one workspace.</div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 page = st.sidebar.radio(
     "Navigate",
     ["Dashboard", "Setups", "Live Signals", "Paper Trades", "MashGPT", "Live Market"],
 )
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("##### Market Watch")
-st.sidebar.caption(", ".join(symbols))
-st.sidebar.markdown("##### Status")
-st.sidebar.write(f"Discord Alerts: {'On' if DISCORD_WEBHOOK_URL else 'Off'}")
+st.sidebar.markdown('<div class="sidebar-section-label">System</div>', unsafe_allow_html=True)
+st.sidebar.markdown(
+    f"""
+    <div class="sidebar-info-card">
+        <div class="sidebar-info-row">
+            <div class="sidebar-info-label">Watchlist</div>
+            <div class="sidebar-info-value">{', '.join(symbols)}</div>
+        </div>
+        <div class="sidebar-info-row">
+            <div class="sidebar-info-label">Live Setups</div>
+            <div class="sidebar-info-value">{int((signals["signal"] == "SHORT SETUP").sum()) if not signals.empty else 0}</div>
+        </div>
+        <div class="sidebar-info-row">
+            <div class="sidebar-info-label">Discord Alerts</div>
+            <div class="sidebar-info-value">{'On' if DISCORD_WEBHOOK_URL else 'Off'}</div>
+        </div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
 
 st.title("Mash Trading Dashboard")
