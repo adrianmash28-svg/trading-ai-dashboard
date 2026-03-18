@@ -208,37 +208,79 @@ def calc_live_signals(symbols):
 
     for symbol in symbols:
         df = fetch_history(symbol, period="5d", interval="15m")
-        if df.empty or len(df) < 25:
+        if df.empty or len(df) < 60:
             continue
 
-        df["sma20"] = df["Close"].rolling(20).mean()
+        df["ema20"] = df["Close"].ewm(span=20, adjust=False).mean()
+        df["ema50"] = df["Close"].ewm(span=50, adjust=False).mean()
         df["vol_avg20"] = df["Volume"].rolling(20).mean()
         df["rel_vol"] = df["Volume"] / df["vol_avg20"]
+        delta = df["Close"].diff()
+        gains = delta.clip(lower=0)
+        losses = -delta.clip(upper=0)
+        avg_gain = gains.rolling(14).mean()
+        avg_loss = losses.rolling(14).mean()
+        rs = avg_gain / avg_loss.replace(0, pd.NA)
+        df["rsi14"] = 100 - (100 / (1 + rs))
 
         last = df.iloc[-1]
         prev = df.iloc[-2]
+        recent_window = df.iloc[-21:-1].copy()
+        if recent_window.empty:
+            continue
 
         close_price = float(last["Close"])
-        sma20 = float(last["sma20"]) if pd.notna(last["sma20"]) else close_price
+        ema20 = float(last["ema20"]) if pd.notna(last["ema20"]) else close_price
+        ema50 = float(last["ema50"]) if pd.notna(last["ema50"]) else close_price
         rel_vol = float(last["rel_vol"]) if pd.notna(last["rel_vol"]) else 0.0
+        rsi14 = float(last["rsi14"]) if pd.notna(last["rsi14"]) else 50.0
+        prev_rsi = float(prev["rsi14"]) if pd.notna(prev["rsi14"]) else rsi14
         change_pct = ((float(last["Close"]) - float(prev["Close"])) / float(prev["Close"])) * 100 if float(prev["Close"]) != 0 else 0.0
+        recent_support = float(recent_window["Low"].min())
+        recent_resistance = float(recent_window["High"].max())
+        recent_range = max(recent_resistance - recent_support, close_price * 0.01)
 
         score = 0
-        if close_price < sma20:
-            score += 20
-        if change_pct < -0.3:
-            score += 20
-        if rel_vol > 1.2:
-            score += 20
-        if float(last["Low"]) <= float(df["Low"].tail(20).min()) * 1.01:
-            score += 20
+        trend_down = ema20 < ema50 and close_price < ema20
+        if trend_down:
+            score += 30
+        elif close_price < ema20:
+            score += 10
 
-        signal = "SHORT SETUP" if score >= 45 else "NO SIGNAL"
+        if 35 <= rsi14 <= 55 and rsi14 <= prev_rsi:
+            score += 18
+        elif rsi14 < 35:
+            score += 8
 
-        risk = max(close_price * 0.003, 0.25)
+        if rel_vol >= 1.8:
+            score += 20
+        elif rel_vol >= 1.35:
+            score += 12
+
+        breakdown_level = recent_support * 1.003
+        if close_price <= breakdown_level:
+            score += 18
+
+        if change_pct <= -0.6:
+            score += 10
+        elif change_pct <= -0.3:
+            score += 5
+
+        risk = max(recent_resistance - close_price, close_price * 0.004, 0.25)
+        projected_target = recent_support - (recent_range * 0.35)
+        reward = max(close_price - projected_target, 0.0)
+        reward_to_risk = reward / risk if risk > 0 else 0.0
+
+        if reward_to_risk >= 2.2:
+            score += 20
+        elif reward_to_risk >= 1.7:
+            score += 10
+
+        signal = "SHORT SETUP" if score >= 60 and trend_down and rel_vol >= 1.1 and reward_to_risk >= 1.7 else "NO SIGNAL"
+
         stop_loss = round(close_price + risk, 4)
-        tp1 = round(close_price - (risk * 2), 4)
-        tp2 = round(close_price - (risk * 3), 4)
+        tp1 = round(close_price - max(risk * 1.5, recent_range * 0.2), 4)
+        tp2 = round(close_price - max(risk * 2.3, recent_range * 0.35), 4)
         shares = int(100 / risk) if risk > 0 else 0
 
         rows.append(
