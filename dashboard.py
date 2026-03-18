@@ -2109,42 +2109,27 @@ if page == "Command Center":
         open_summary = open_trades[["symbol", "signal", "entry", "stop_loss", "take_profit_1", "take_profit_2"]].copy()
         st.dataframe(open_summary, width="stretch", height=220)
 
-    lower_left, lower_right = st.columns([1.05, 0.95])
-    with lower_left:
-        st.markdown("### Market Intelligence")
-        quick_prompt = st.text_input(
-            "Ask MashGPT from Command Center",
-            key="command_center_prompt",
-            placeholder="What is the best setup right now?",
-            label_visibility="collapsed",
+    st.markdown("### Algo Status")
+    algo_state = algo_update_info.get("state", {})
+    next_slot = algo_update_info.get("next_slot")
+    st.caption(f"Last update: {algo_state.get('last_sent_at', '') or 'Not yet sent'}")
+    st.caption(f"Signature: {algo_update_info.get('signature_hash', 'n/a')}")
+    st.caption(
+        "Next update: "
+        + (next_slot.strftime("%Y-%m-%d %I:%M %p %Z") if next_slot else "Unavailable")
+    )
+    if algo_state.get("last_message"):
+        st.info(algo_state["last_message"])
+    if st.button("Send Sample Algo Update", key="send-sample-algo-update", use_container_width=True):
+        sample_message = build_algo_update_message(
+            algo_update_info.get("summary", {}),
+            algo_update_info.get("changed", False),
         )
-        if st.button("Ask MashGPT", key="command-center-ask", use_container_width=True) and quick_prompt.strip():
-            st.session_state.command_center_reply = ask_mashgpt(quick_prompt, signals, open_trades, closed_trades)
-        if st.session_state.get("command_center_reply"):
-            st.info(st.session_state["command_center_reply"])
-
-    with lower_right:
-        st.markdown("### Algo Status")
-        algo_state = algo_update_info.get("state", {})
-        next_slot = algo_update_info.get("next_slot")
-        st.caption(f"Last update: {algo_state.get('last_sent_at', '') or 'Not yet sent'}")
-        st.caption(f"Signature: {algo_update_info.get('signature_hash', 'n/a')}")
-        st.caption(
-            "Next update: "
-            + (next_slot.strftime("%Y-%m-%d %I:%M %p %Z") if next_slot else "Unavailable")
-        )
-        if algo_state.get("last_message"):
-            st.info(algo_state["last_message"])
-        if st.button("Send Sample Algo Update", key="send-sample-algo-update", use_container_width=True):
-            sample_message = build_algo_update_message(
-                algo_update_info.get("summary", {}),
-                algo_update_info.get("changed", False),
-            )
-            sample_ok, sample_error = send_sms_alert(sample_message)
-            if sample_ok:
-                st.success("Sample algo update sent")
-            else:
-                st.error(f"Sample algo update could not be sent{f': {sample_error}' if sample_error else ''}")
+        sample_ok, sample_error = send_sms_alert(sample_message)
+        if sample_ok:
+            st.success("Sample algo update sent")
+        else:
+            st.error(f"Sample algo update could not be sent{f': {sample_error}' if sample_error else ''}")
 
 elif page == "Dashboard":
     render_page_header(
