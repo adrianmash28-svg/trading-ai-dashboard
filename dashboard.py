@@ -40,8 +40,8 @@ POLYGON_API_KEY = get_secret("POLYGON_API_KEY", "")
 VERIZON_SMS_GATEWAY = "3109911161@vtext.com"
 
 PAPER_TRADES_FILE = "paper_trades.csv"
-DEFAULT_SYMBOLS = ["META", "NVDA", "AAPL", "MSFT"]
-BACKTEST_SYMBOLS = ["SPY", "QQQ", "NVDA", "TSLA", "AAPL", "MSFT", "META", "AMZN", "GOOGL", "AMD"]
+DEFAULT_SYMBOLS = ["AAPL", "MSFT", "NVDA", "META", "AMZN", "TSLA", "AMD", "QQQ", "SPY", "IWM", "DIA", "BTC-USD", "ETH-USD"]
+BACKTEST_SYMBOLS = ["SPY", "QQQ", "IWM", "DIA", "NVDA", "TSLA", "AAPL", "MSFT", "META", "AMZN", "GOOGL", "AMD", "BTC-USD", "ETH-USD"]
 STRATEGY_REGISTRY_FILE = "strategy_registry.json"
 ALGO_UPDATE_STATE_FILE = "algo_update_state.json"
 STARTING_EQUITY = 10000.0
@@ -80,10 +80,10 @@ client = get_openai_client()
 
 def default_strategy_parameters():
     return {
-        "score_threshold": 70,
-        "rsi_long_min": 58,
-        "rsi_short_max": 42,
-        "rel_vol_min": 1.6,
+        "score_threshold": 65,
+        "rsi_long_min": 55,
+        "rsi_short_max": 45,
+        "rel_vol_min": 1.5,
         "ema_short_len": 20,
         "ema_long_len": 50,
         "stop_multiplier": 1.0,
@@ -167,6 +167,19 @@ def load_strategy_registry():
             "parameters": default_strategy_parameters(),
             "results_summary": {},
             "promotion_status": "Live champion tightened for higher-quality setups",
+            "paper_probation_passed": True,
+            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        save_strategy_registry(registry)
+    if registry["champion"].get("version", 2) < 3:
+        registry["previous_champion"] = registry.get("champion")
+        registry["champion"] = {
+            "id": "champion-v3",
+            "version": 3,
+            "status": "champion",
+            "parameters": default_strategy_parameters(),
+            "results_summary": {},
+            "promotion_status": "Live champion slightly loosened to surface more valid trades",
             "paper_probation_passed": True,
             "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         }
