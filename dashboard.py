@@ -389,14 +389,18 @@ def ensure_paper_trades_file():
     cols = [
         "symbol",
         "time",
+        "timestamp",
+        "timeframe",
         "entry",
         "stop_loss",
         "take_profit_1",
         "take_profit_2",
         "shares",
         "score",
+        "reason",
         "signal",
         "status",
+        "result",
         "pnl",
         "exit_price",
         "exit_reason",
@@ -453,6 +457,23 @@ def fetch_history(symbol: str, period: str = "6mo", interval: str = "1d") -> pd.
     df = df[needed].copy().dropna()
     df.index = pd.to_datetime(df.index)
     return df
+
+
+def build_trade_reason(signal: str, trend_ok: bool, momentum_ok: bool, volume_ok: bool, structure_ok: bool, rr_ok: bool) -> str:
+    parts = []
+    if trend_ok:
+        parts.append("Trend")
+    if momentum_ok:
+        parts.append("RSI")
+    if volume_ok:
+        parts.append("Volume")
+    if structure_ok:
+        parts.append("Structure")
+    if rr_ok:
+        parts.append("R/R")
+    if not parts:
+        parts.append("Scanner")
+    return " + ".join(parts)
 
 
 def get_market_bias(df: pd.DataFrame) -> str:
@@ -581,6 +602,24 @@ def build_signal_snapshot(
 
     allow_long = market_bias == "bullish"
     allow_short = market_bias == "bearish"
+    long_reason = build_trade_reason(
+        "LONG SETUP",
+        trend_up,
+        rsi14 > params["rsi_long_min"],
+        rel_vol >= params["rel_vol_min"],
+        close_price >= breakout_level,
+        long_rr >= 2.0,
+    )
+    short_reason = build_trade_reason(
+        "SHORT SETUP",
+        trend_down,
+        rsi14 < params["rsi_short_max"],
+        rel_vol >= params["rel_vol_min"],
+        close_price <= breakdown_level,
+        short_rr >= 2.0,
+    )
+    timeframe = "15m"
+    snapshot_timestamp = str(work_df.index[-1])
 
     if long_score >= short_score and long_score >= params["score_threshold"] and trend_up and rel_vol >= params["rel_vol_min"] and rsi14 > params["rsi_long_min"] and long_rr >= 2.0 and allow_long:
         signal = "LONG SETUP"
@@ -589,6 +628,7 @@ def build_signal_snapshot(
         stop_loss = round(close_price - risk, 4)
         tp1 = round(close_price + max(risk * params["tp1_multiplier"], recent_range * 0.2), 4)
         tp2 = round(close_price + max(risk * params["tp2_multiplier"], recent_range * 0.35), 4)
+        reason = long_reason
     elif short_score > long_score and short_score >= params["score_threshold"] and trend_down and rel_vol >= params["rel_vol_min"] and rsi14 < params["rsi_short_max"] and short_rr >= 2.0 and allow_short:
         signal = "SHORT SETUP"
         score = short_score
@@ -596,6 +636,7 @@ def build_signal_snapshot(
         stop_loss = round(close_price + risk, 4)
         tp1 = round(close_price - max(risk * params["tp1_multiplier"], recent_range * 0.2), 4)
         tp2 = round(close_price - max(risk * params["tp2_multiplier"], recent_range * 0.35), 4)
+        reason = short_reason
     else:
         signal = "NO SIGNAL"
         score = max(long_score, short_score)
@@ -603,12 +644,15 @@ def build_signal_snapshot(
         stop_loss = round(close_price + short_risk, 4)
         tp1 = round(close_price - max(short_risk * 1.5, recent_range * 0.2), 4)
         tp2 = round(close_price - max(short_risk * 2.3, recent_range * 0.35), 4)
+        reason = long_reason if long_score >= short_score else short_reason
 
     risk_budget = max(float(account_equity) * RISK_PER_TRADE, 0.0)
     shares = int(risk_budget / risk) if risk > 0 else 0
     return {
         "symbol": symbol,
         "time": str(work_df.index[-1]),
+        "timestamp": snapshot_timestamp,
+        "timeframe": timeframe,
         "close": round(close_price, 2),
         "score": score,
         "entry": round(close_price, 4),
@@ -616,6 +660,7 @@ def build_signal_snapshot(
         "take_profit_1": tp1,
         "take_profit_2": tp2,
         "shares": shares,
+        "reason": reason,
         "signal": signal,
         "rel_vol": round(rel_vol, 2),
         "change_pct": round(change_pct, 2),
@@ -1206,14 +1251,18 @@ def log_active_signals(signals: pd.DataFrame, paper: pd.DataFrame):
         new_row = {
             "symbol": row["symbol"],
             "time": row["time"],
+            "timestamp": row.get("timestamp", row["time"]),
+            "timeframe": row.get("timeframe", "15m"),
             "entry": row["entry"],
             "stop_loss": row["stop_loss"],
             "take_profit_1": row["take_profit_1"],
             "take_profit_2": row["take_profit_2"],
             "shares": row["shares"],
             "score": row["score"],
+            "reason": row.get("reason", ""),
             "signal": row["signal"],
             "status": "OPEN",
+            "result": "",
             "pnl": "",
             "exit_price": "",
             "exit_reason": "",
@@ -1280,6 +1329,7 @@ def update_open_trades(paper: pd.DataFrame):
             pnl = round((entry - exit_price) * shares, 2)
 
         paper.at[idx, "status"] = status
+        paper.at[idx, "result"] = "win" if status == "CLOSED WIN" else "loss"
         paper.at[idx, "pnl"] = pnl
         paper.at[idx, "exit_price"] = exit_price
         paper.at[idx, "exit_reason"] = reason
@@ -1332,14 +1382,18 @@ def add_paper_trade_from_setup(setup_row, paper_df: pd.DataFrame):
     new_row = {
         "symbol": symbol,
         "time": str(setup_row["time"]),
+        "timestamp": str(setup_row.get("timestamp", setup_row["time"])),
+        "timeframe": str(setup_row.get("timeframe", "15m")),
         "entry": setup_row["entry"],
         "stop_loss": setup_row["stop_loss"],
         "take_profit_1": setup_row["take_profit_1"],
         "take_profit_2": setup_row["take_profit_2"],
         "shares": setup_row["shares"],
         "score": setup_row["score"],
+        "reason": str(setup_row.get("reason", "")),
         "signal": setup_row["signal"],
         "status": "OPEN",
+        "result": "",
         "pnl": "",
         "exit_price": "",
         "exit_reason": "",
@@ -1910,8 +1964,15 @@ save_paper_trades(paper)
 
 open_trades = paper[paper["status"].astype(str) == "OPEN"].copy()
 closed_trades = paper[paper["status"].astype(str).str.startswith("CLOSED")].copy()
+trade_log = closed_trades.copy()
+if not trade_log.empty and "result" in trade_log.columns:
+    missing_result = trade_log["result"].astype(str).str.strip() == ""
+    trade_log.loc[missing_result, "result"] = trade_log.loc[missing_result, "status"].astype(str).apply(
+        lambda status: "win" if "WIN" in status else "loss"
+    )
 paper_pnl = pd.to_numeric(closed_trades["pnl"], errors="coerce").fillna(0).sum()
 st.session_state.open_trades = open_trades.to_dict("records")
+st.session_state.trade_log = trade_log.to_dict("records")
 
 performance = create_paper_performance_curve(closed_trades)
 win_rate = round((performance["pnl"] > 0).mean() * 100, 2) if not closed_trades.empty else 0.0
@@ -2088,13 +2149,19 @@ if page == "Command Center":
                     st.session_state.open_trades.append(
                         {
                             "symbol": str(setup["symbol"]),
+                            "time": str(setup["time"]),
+                            "timestamp": str(setup.get("timestamp", setup["time"])),
+                            "timeframe": str(setup.get("timeframe", "15m")),
                             "entry": setup["entry"],
                             "stop_loss": setup["stop_loss"],
                             "take_profit_1": setup["take_profit_1"],
                             "take_profit_2": setup["take_profit_2"],
                             "shares": setup["shares"],
+                            "score": setup["score"],
+                            "reason": str(setup.get("reason", "")),
                             "signal": str(setup["signal"]),
                             "status": "OPEN",
+                            "result": "",
                         }
                     )
                     save_paper_trades(paper)
@@ -2304,7 +2371,11 @@ elif page == "Performance":
             col for col in [
                 "close_time",
                 "symbol",
+                "timeframe",
                 "signal",
+                "reason",
+                "score",
+                "result",
                 "status",
                 "entry",
                 "exit_price",
@@ -2317,6 +2388,56 @@ elif page == "Performance":
             width="stretch",
             height=240,
         )
+
+    st.markdown("### Trade Insights")
+    if trade_log.empty:
+        st.caption("Trade insights will populate after completed trades are recorded.")
+    else:
+        insights_log = trade_log.copy()
+        insights_log["pnl"] = pd.to_numeric(insights_log["pnl"], errors="coerce").fillna(0.0)
+        insights_log["score"] = pd.to_numeric(insights_log["score"], errors="coerce").fillna(0.0)
+        insights_log["result"] = insights_log["result"].astype(str).str.lower()
+        insights_log["reason"] = insights_log["reason"].replace("", "Unspecified").fillna("Unspecified")
+        insights_log["timeframe"] = insights_log["timeframe"].replace("", "Unknown").fillna("Unknown")
+        insights_log["score_range"] = pd.cut(
+            insights_log["score"],
+            bins=[-0.1, 50, 70, float("inf")],
+            labels=["0-50", "50-70", "70+"],
+            include_lowest=True,
+        )
+
+        insights1, insights2 = st.columns([0.8, 1.2])
+        insights1.metric("Average P&L / Trade", f"${float(insights_log['pnl'].mean()):,.2f}")
+        with insights2:
+            st.caption("Win Rate by Reason")
+        reason_win_rates = (
+            insights_log.groupby("reason", dropna=False)["result"]
+            .apply(lambda s: round((s == "win").mean() * 100, 2))
+            .reset_index(name="win_rate_pct")
+            .sort_values(["win_rate_pct", "reason"], ascending=[False, True])
+        )
+        score_win_rates = (
+            insights_log.groupby("score_range", dropna=False)["result"]
+            .apply(lambda s: round((s == "win").mean() * 100, 2))
+            .reset_index(name="win_rate_pct")
+        )
+        timeframe_totals = (
+            insights_log.groupby("timeframe", dropna=False)
+            .size()
+            .reset_index(name="total_trades")
+            .sort_values(["total_trades", "timeframe"], ascending=[False, True])
+        )
+
+        with insights2:
+            st.dataframe(reason_win_rates, width="stretch", height=180)
+
+        insight_col1, insight_col2 = st.columns(2)
+        with insight_col1:
+            st.caption("Win Rate by Score Range")
+            st.dataframe(score_win_rates, width="stretch", height=160)
+        with insight_col2:
+            st.caption("Total Trades by Timeframe")
+            st.dataframe(timeframe_totals, width="stretch", height=160)
 
     with st.expander("Strategy Lab", expanded=False):
         render_strategy_lab_section(strategy_registry)
@@ -2463,13 +2584,19 @@ elif page == "Trades":
                 if added:
                     session_trade = {
                         "symbol": str(setup["symbol"]),
+                        "time": str(setup["time"]),
+                        "timestamp": str(setup.get("timestamp", setup["time"])),
+                        "timeframe": str(setup.get("timeframe", "15m")),
                         "entry": setup["entry"],
                         "stop_loss": setup["stop_loss"],
                         "take_profit_1": setup["take_profit_1"],
                         "take_profit_2": setup["take_profit_2"],
                         "shares": setup["shares"],
+                        "score": setup["score"],
+                        "reason": str(setup.get("reason", "")),
                         "signal": str(setup["signal"]),
                         "status": "OPEN",
+                        "result": "",
                     }
                     st.session_state.open_trades.append(session_trade)
                     save_paper_trades(paper)
@@ -2736,13 +2863,19 @@ elif page == "Setups":
                 if added:
                     session_trade = {
                         "symbol": str(setup["symbol"]),
+                        "time": str(setup["time"]),
+                        "timestamp": str(setup.get("timestamp", setup["time"])),
+                        "timeframe": str(setup.get("timeframe", "15m")),
                         "entry": setup["entry"],
                         "stop_loss": setup["stop_loss"],
                         "take_profit_1": setup["take_profit_1"],
                         "take_profit_2": setup["take_profit_2"],
                         "shares": setup["shares"],
+                        "score": setup["score"],
+                        "reason": str(setup.get("reason", "")),
                         "signal": str(setup["signal"]),
                         "status": "OPEN",
+                        "result": "",
                     }
                     st.session_state.open_trades.append(session_trade)
                     save_paper_trades(paper)
