@@ -33,8 +33,8 @@ def get_secret(name: str, default: str = "") -> str:
 OPENAI_API_KEY = get_secret("OPENAI_API_KEY", "")
 EMAIL_SENDER = get_secret("EMAIL_SENDER", "")
 EMAIL_PASSWORD = get_secret("EMAIL_PASSWORD", "")
-ALERT_TO_NUMBER = get_secret("ALERT_TO_NUMBER", "")
 POLYGON_API_KEY = get_secret("ypKE7G5kgwYcGEPApyKMWjpgp4JGpCTT", "")
+VERIZON_SMS_GATEWAY = "3109911161@vtext.com"
 
 PAPER_TRADES_FILE = "paper_trades.csv"
 DEFAULT_SYMBOLS = ["META", "NVDA", "AAPL", "MSFT"]
@@ -53,18 +53,6 @@ def get_openai_client():
 client = get_openai_client()
 
 
-def get_sms_gateway_address(value: str) -> str:
-    raw_value = str(value).strip()
-    if not raw_value:
-        return ""
-    if "@" in raw_value:
-        return raw_value
-    digits = "".join(ch for ch in raw_value if ch.isdigit())
-    if not digits:
-        return ""
-    return f"{digits}@vtext.com"
-
-
 def get_smtp_settings(sender: str):
     domain = sender.split("@")[-1].lower() if "@" in sender else ""
     if domain in {"gmail.com", "googlemail.com"}:
@@ -79,17 +67,14 @@ def get_smtp_settings(sender: str):
 
 
 def send_sms_alert(message: str):
-    if not all([EMAIL_SENDER, EMAIL_PASSWORD, ALERT_TO_NUMBER]):
+    if not all([EMAIL_SENDER, EMAIL_PASSWORD]):
         return False, "Missing email SMS credentials"
-    sms_gateway_address = get_sms_gateway_address(ALERT_TO_NUMBER)
-    if not sms_gateway_address:
-        return False, "Invalid ALERT_TO_NUMBER"
     try:
         smtp_host, smtp_port = get_smtp_settings(EMAIL_SENDER)
         email_message = EmailMessage()
         email_message["From"] = EMAIL_SENDER
-        email_message["To"] = sms_gateway_address
-        email_message["Subject"] = ""
+        email_message["To"] = VERIZON_SMS_GATEWAY
+        email_message["Subject"] = "MashGPT Alert"
         email_message.set_content(str(message).strip()[:160])
 
         with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as server:
@@ -811,8 +796,8 @@ st.sidebar.markdown(
             <div class="sidebar-info-value">{int((signals["signal"] == "SHORT SETUP").sum()) if not signals.empty else 0}</div>
         </div>
         <div class="sidebar-info-row">
-            <div class="sidebar-info-label">SMS Alerts</div>
-            <div class="sidebar-info-value">{'On' if all([EMAIL_SENDER, EMAIL_PASSWORD, ALERT_TO_NUMBER]) else 'Off'}</div>
+            <div class="sidebar-info-label">Phone Alerts</div>
+            <div class="sidebar-info-value">{'On' if all([EMAIL_SENDER, EMAIL_PASSWORD]) else 'Off'}</div>
         </div>
     </div>
     """,
@@ -826,8 +811,7 @@ if st.sidebar.button("Send Test SMS", use_container_width=True):
         st.sidebar.error(f"Test SMS could not be sent{f': {sms_error}' if sms_error else ''}")
     st.sidebar.caption(f"EMAIL_SENDER set: {'Yes' if bool(EMAIL_SENDER) else 'No'}")
     st.sidebar.caption(f"EMAIL_PASSWORD set: {'Yes' if bool(EMAIL_PASSWORD) else 'No'}")
-    st.sidebar.caption(f"ALERT_TO_NUMBER: {ALERT_TO_NUMBER or '(missing)'}")
-    st.sidebar.caption(f"SMS gateway address: {get_sms_gateway_address(ALERT_TO_NUMBER) or '(invalid)'}")
+    st.sidebar.caption(f"Gateway address: {VERIZON_SMS_GATEWAY}")
 
 
 st.title("Mash Trading Dashboard")
