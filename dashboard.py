@@ -18,7 +18,7 @@ except Exception:
     OpenAI = None
 
 
-st.set_page_config(page_title="Mash Trading Dashboard", layout="wide")
+st.set_page_config(page_title="Mash Terminal", layout="wide")
 
 
 def get_secret(name: str, default: str = "") -> str:
@@ -530,6 +530,19 @@ def style_dashboard_chart(ax, title: str, xlabel: str, ylabel: str):
     ax.spines["bottom"].set_color("#475569")
 
 
+def render_page_header(title: str, subtitle: str, eyebrow: str = "Workspace"):
+    st.markdown(
+        f"""
+        <div class="page-hero">
+            <div class="page-eyebrow">{eyebrow}</div>
+            <div class="page-title">{title}</div>
+            <div class="page-subtitle">{subtitle}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def ask_mashgpt(prompt: str, signals_df: pd.DataFrame, open_trades_df: pd.DataFrame, closed_trades_df: pd.DataFrame):
     if not client:
         return "OpenAI key is not connected."
@@ -804,6 +817,31 @@ st.markdown(
         font-size: 0.98rem;
         line-height: 1.55;
     }
+    .page-hero {
+        margin: 0.1rem 0 1rem 0;
+    }
+    .page-eyebrow {
+        color: #38bdf8;
+        font-size: 0.72rem;
+        font-weight: 800;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        margin-bottom: 0.28rem;
+    }
+    .page-title {
+        color: #f8fafc;
+        font-size: 1.42rem;
+        font-weight: 780;
+        line-height: 1.08;
+        letter-spacing: -0.024em;
+        margin-bottom: 0.28rem;
+    }
+    .page-subtitle {
+        color: #94a3b8;
+        font-size: 0.95rem;
+        line-height: 1.5;
+        max-width: 920px;
+    }
     .top-trade-banner {
         background: linear-gradient(135deg, rgba(30, 41, 59, 0.95) 0%, rgba(15, 23, 42, 0.98) 100%);
         border: 1px solid #f59e0b;
@@ -1001,9 +1039,9 @@ if st.sidebar.button("Send Test SMS", use_container_width=True):
 st.markdown(
     f"""
     <div class="app-hero">
-        <div class="app-kicker">Mash Trading Platform</div>
-        <div class="app-title">Realtime signals, execution, and market intelligence in one terminal.</div>
-        <div class="app-subtitle">Command your watchlist, monitor paper performance, and act on long or short setups with a cleaner product-grade workspace. Last refreshed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</div>
+        <div class="app-kicker">Mash Terminal</div>
+        <div class="app-title">A sharper command layer for realtime trading signals, paper execution, and market intelligence.</div>
+        <div class="app-subtitle">Track the best setup, monitor paper performance, and move from signal to decision inside one polished trading workspace. Last refreshed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</div>
     </div>
     """,
     unsafe_allow_html=True,
@@ -1017,7 +1055,11 @@ m4.metric("Live Setups", int(signals["signal"].astype(str).isin(["LONG SETUP", "
 
 
 if page == "Command Center":
-    st.subheader("Command Center")
+    render_page_header(
+        "Command Center",
+        "Your product home screen for top opportunities, trading mode, open risk, and recent market activity.",
+        "Control Room",
+    )
 
     if not signals.empty:
         top_setup = signals.sort_values("score", ascending=False).iloc[0]
@@ -1108,6 +1150,11 @@ if page == "Command Center":
             st.caption("No recent activity yet.")
 
 elif page == "Dashboard":
+    render_page_header(
+        "Performance Dashboard",
+        "Monitor paper equity, drawdown, and current system activity from one clean trading overview.",
+        "Overview",
+    )
     if not signals.empty:
         best_signal = signals.sort_values("score", ascending=False).iloc[0]
         st.markdown(
@@ -1183,14 +1230,22 @@ elif page == "Dashboard":
     a2.metric("Closed This Refresh", newly_closed)
 
 elif page == "Live Signals":
-    st.subheader("Live Signals")
+    render_page_header(
+        "Live Signals",
+        "Scan the current signal feed and review what the algorithm is flagging right now.",
+        "Market Feed",
+    )
     if signals.empty:
         st.info("No live signals right now.")
     else:
         st.dataframe(signals, width="stretch", height=420)
 
 elif page == "Setups":
-    st.subheader("Setups")
+    render_page_header(
+        "Setups",
+        "Ranked trade opportunities with cleaner scoring, verdicts, and fast paper-trade execution.",
+        "Opportunity Board",
+    )
     if signals.empty:
         st.info("No setups available right now.")
     else:
@@ -1303,13 +1358,18 @@ elif page == "Setups":
             st.markdown("")
 
 elif page == "Paper Trades":
-    st.subheader("Open Paper Trades")
+    render_page_header(
+        "Paper Trades",
+        "Review open exposure, closed outcomes, and overall paper performance in one place.",
+        "Execution",
+    )
+    st.markdown("### Open Paper Trades")
     if open_trades.empty:
         st.write("No open paper trades.")
     else:
         st.dataframe(open_trades, width="stretch", height=260)
 
-    st.subheader("Closed Paper Trades")
+    st.markdown("### Closed Paper Trades")
     if closed_trades.empty:
         st.write("No closed paper trades.")
     else:
@@ -1318,7 +1378,11 @@ elif page == "Paper Trades":
     st.metric("Paper P&L", f"${round(float(paper_pnl), 2)}")
 
 elif page == "MashGPT":
-    st.subheader("MashGPT")
+    render_page_header(
+        "MashGPT",
+        "Ask for trader-focused readouts on live setups, risk, and market context with faster feedback.",
+        "Market Intelligence",
+    )
 
     if signals is not None and not signals.empty:
         best_signal = signals.sort_values("score", ascending=False).iloc[0]
@@ -1406,7 +1470,11 @@ elif page == "MashGPT":
         st.session_state.chat_history.append(("assistant", reply))
 
 elif page == "Live Market":
-    st.markdown("## Live Market")
+    render_page_header(
+        "Live Market",
+        "Watch the active symbol in a wider terminal view with quick picks, live stats, and realtime refresh.",
+        "Terminal View",
+    )
     st_autorefresh(interval=5000, key="live_market_refresh")
 
     if "live_market_symbol" not in st.session_state:
