@@ -38,6 +38,7 @@ VERIZON_SMS_GATEWAY = "3109911161@vtext.com"
 
 PAPER_TRADES_FILE = "paper_trades.csv"
 DEFAULT_SYMBOLS = ["META", "NVDA", "AAPL", "MSFT"]
+BACKTEST_SYMBOLS = ["SPY", "QQQ", "NVDA", "TSLA", "AAPL", "MSFT"]
 STARTING_EQUITY = 10000.0
 
 
@@ -1448,8 +1449,11 @@ elif page == "Performance":
         "Strategy Lab",
     )
 
+    st.caption(
+        f"Backtest universe: {', '.join(BACKTEST_SYMBOLS)} | Lookback: ~1 year of daily candles per symbol"
+    )
     with st.spinner("Running historical backtest..."):
-        backtest_trades = run_strategy_backtest(tuple(symbols), period="1y", interval="1d")
+        backtest_trades = run_strategy_backtest(tuple(BACKTEST_SYMBOLS), period="1y", interval="1d")
     backtest_summary = summarize_backtest_results(backtest_trades)
     backtest_curve = create_paper_performance_curve(backtest_trades)
 
