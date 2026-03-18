@@ -134,6 +134,7 @@ def default_strategy_registry():
         "experiments": [],
         "experiment_index": 0,
         "last_research_run": "",
+        "last_challenger_result": "",
     }
 
 
@@ -983,6 +984,20 @@ def research_loop_due(registry):
     return datetime.now(APP_TIMEZONE) - parsed >= timedelta(hours=RESEARCH_LOOP_HOURS)
 
 
+def get_next_research_run(registry):
+    last_run = registry.get("last_research_run", "")
+    if not last_run:
+        return datetime.now(APP_TIMEZONE)
+    parsed = pd.to_datetime(last_run, errors="coerce")
+    if pd.isna(parsed):
+        return datetime.now(APP_TIMEZONE)
+    if getattr(parsed, "tzinfo", None) is None:
+        parsed = parsed.tz_localize(APP_TIMEZONE)
+    else:
+        parsed = parsed.tz_convert(APP_TIMEZONE)
+    return parsed + timedelta(hours=RESEARCH_LOOP_HOURS)
+
+
 def advance_strategy_research(registry):
     base_params = registry["champion"]["parameters"]
     candidates = generate_strategy_candidates(base_params)
@@ -1036,6 +1051,7 @@ def advance_strategy_research(registry):
             "promotion_status": f"Rejected: {', '.join(failed_reasons) if failed_reasons else 'Promotion gates not met'}",
         }
     registry["last_research_run"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    registry["last_challenger_result"] = experiment_record.get("promotion_status", "")
     save_strategy_registry(registry)
     return registry
 
@@ -2224,8 +2240,22 @@ elif page == "Strategy Lab":
     champion = strategy_registry["champion"]
     challenger = strategy_registry.get("challenger")
     champion_summary = champion.get("results_summary", {})
+    next_research_run = get_next_research_run(strategy_registry)
+    status_left, status_right, status_third = st.columns(3)
+    status_left.metric(
+        "Last Challenger Run",
+        format_strategy_timestamp(strategy_registry.get("last_research_run", "")),
+    )
+    status_right.metric(
+        "Next Estimated Run",
+        next_research_run.strftime("%b %d, %Y %-I:%M %p"),
+    )
+    status_third.metric(
+        "Last Result",
+        strategy_registry.get("last_challenger_result", "Not yet run") or "Not yet run",
+    )
     st.caption(
-        f"Controlled research loop cadence: every {RESEARCH_LOOP_HOURS} hours on app activity | Last run: {strategy_registry.get('last_research_run', 'Not yet run') or 'Not yet run'}"
+        f"Controlled research loop cadence: every {RESEARCH_LOOP_HOURS} hours on app activity."
     )
 
     if strategy_registry.get("previous_champion") and st.button("Rollback to Previous Champion", use_container_width=True):
