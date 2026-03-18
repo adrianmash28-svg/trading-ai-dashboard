@@ -60,9 +60,10 @@ APPROVED_MOMENTUM_WEIGHTS = [14, 18, 22]
 APPROVED_VOLUME_WEIGHTS = [10, 12, 16]
 APPROVED_STRUCTURE_WEIGHTS = [12, 18, 24]
 APPROVED_RR_WEIGHTS = [10, 20, 24]
-MIN_PROMOTION_TRADES = 20
+MIN_PROMOTION_TRADES = 30
 MAX_DRAWDOWN_DEGRADATION = 0.10
 APP_TIMEZONE = ZoneInfo("America/Los_Angeles")
+RESEARCH_LOOP_HOURS = 4
 
 
 def get_openai_client():
@@ -278,18 +279,17 @@ def get_next_schedule_slot(dt_local: datetime):
 def generate_strategy_candidates(base_params):
     base = sanitize_strategy_parameters(base_params)
     candidate_specs = [
-        {"score_threshold": 65},
-        {"score_threshold": 70},
-        {"rel_vol_min": 1.6},
-        {"rel_vol_min": 1.8},
-        {"rsi_long_min": 58, "rsi_short_max": 42},
+        {"score_threshold": 75},
+        {"rsi_long_min": 55, "rsi_short_max": 45},
         {"rsi_long_min": 60, "rsi_short_max": 40},
-        {"ema_short_len": 12, "ema_long_len": 50},
-        {"ema_short_len": 20, "ema_long_len": 60},
-        {"stop_multiplier": 1.1, "tp1_multiplier": 1.5, "tp2_multiplier": 2.3},
-        {"stop_multiplier": 1.0, "tp1_multiplier": 1.7, "tp2_multiplier": 2.6},
-        {"trend_weight": 34, "structure_weight": 24},
-        {"momentum_weight": 22, "volume_weight": 16, "rr_weight": 24},
+        {"rel_vol_min": 1.5},
+        {"rel_vol_min": 1.8},
+        {"stop_multiplier": 1.1},
+        {"stop_multiplier": 1.2},
+        {"tp1_multiplier": 1.5, "tp2_multiplier": 2.3},
+        {"tp1_multiplier": 1.7, "tp2_multiplier": 2.6},
+        {"rsi_long_min": 60, "rsi_short_max": 40, "rel_vol_min": 1.8},
+        {"stop_multiplier": 1.1, "tp1_multiplier": 1.7, "tp2_multiplier": 2.6},
     ]
     candidates = []
     seen = set()
@@ -947,6 +947,20 @@ def format_strategy_timestamp(value):
     return parsed.strftime("%b %d, %Y %-I:%M %p")
 
 
+def research_loop_due(registry):
+    last_run = registry.get("last_research_run", "")
+    if not last_run:
+        return True
+    parsed = pd.to_datetime(last_run, errors="coerce")
+    if pd.isna(parsed):
+        return True
+    if getattr(parsed, "tzinfo", None) is None:
+        parsed = parsed.tz_localize(APP_TIMEZONE)
+    else:
+        parsed = parsed.tz_convert(APP_TIMEZONE)
+    return datetime.now(APP_TIMEZONE) - parsed >= timedelta(hours=RESEARCH_LOOP_HOURS)
+
+
 def advance_strategy_research(registry):
     base_params = registry["champion"]["parameters"]
     candidates = generate_strategy_candidates(base_params)
@@ -978,14 +992,36 @@ def advance_strategy_research(registry):
         "challenger",
         next_candidate,
         challenger_summary,
-        "Eligible for paper probation" if eligible else "Rejected by promotion gates",
-        paper_probation_passed=False,
+        "Promoted to champion" if eligible else "Rejected by promotion gates",
+        paper_probation_passed=eligible,
     )
     registry.setdefault("experiments", []).append(experiment_record)
-    registry["challenger"] = experiment_record if eligible else registry.get("challenger")
+    if eligible:
+        registry["previous_champion"] = registry["champion"]
+        registry["champion"] = {
+            **experiment_record,
+            "status": "champion",
+            "promotion_status": "Promoted to champion by controlled research loop",
+        }
+        registry["challenger"] = None
+    else:
+        registry["challenger"] = {
+            **experiment_record,
+            "status": "challenger",
+            "promotion_status": "Rejected by promotion gates",
+        }
     registry["last_research_run"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     save_strategy_registry(registry)
     return registry
+
+
+def maybe_run_controlled_research_loop(registry):
+    if not research_loop_due(registry):
+        return registry
+    if not registry["champion"].get("results_summary"):
+        _, champion_summary, _ = run_validation_split(BACKTEST_SYMBOLS, registry["champion"]["parameters"])
+        registry["champion"]["results_summary"] = champion_summary
+    return advance_strategy_research(registry)
 
 
 def promote_challenger(registry):
@@ -1708,6 +1744,7 @@ st.markdown(
 symbols = DEFAULT_SYMBOLS
 paper = load_paper_trades()
 strategy_registry = load_strategy_registry()
+strategy_registry = maybe_run_controlled_research_loop(strategy_registry)
 algo_update_info = maybe_send_algorithm_status_update(strategy_registry)
 if "trading_mode" not in st.session_state:
     st.session_state.trading_mode = "Manual"
@@ -2153,33 +2190,18 @@ elif page == "Strategy Lab":
         strategy_registry["champion"]["results_summary"] = champion_summary
         save_strategy_registry(strategy_registry)
 
-    with st.spinner("Research engine evaluating an approved challenger..."):
-        strategy_registry = advance_strategy_research(load_strategy_registry())
-
     champion = strategy_registry["champion"]
     challenger = strategy_registry.get("challenger")
     champion_summary = champion.get("results_summary", {})
+    st.caption(
+        f"Controlled research loop cadence: every {RESEARCH_LOOP_HOURS} hours on app activity | Last run: {strategy_registry.get('last_research_run', 'Not yet run') or 'Not yet run'}"
+    )
 
-    if challenger and st.button("Mark Challenger Probation Passed", use_container_width=True):
-        strategy_registry["challenger"]["paper_probation_passed"] = True
-        strategy_registry["challenger"]["promotion_status"] = "Paper probation passed"
-        save_strategy_registry(strategy_registry)
-        st.rerun()
-
-    action_left, action_right = st.columns(2)
-    with action_left:
-        if challenger and challenger.get("paper_probation_passed") and st.button("Promote Challenger", use_container_width=True):
-            strategy_registry, promoted = promote_challenger(strategy_registry)
-            if promoted:
-                st.success("Challenger promoted to champion")
-                st.rerun()
-            st.info("Promotion gates are not fully satisfied yet.")
-    with action_right:
-        if strategy_registry.get("previous_champion") and st.button("Rollback to Previous Champion", use_container_width=True):
-            strategy_registry, rolled_back = rollback_champion(strategy_registry)
-            if rolled_back:
-                st.success("Previous champion restored")
-                st.rerun()
+    if strategy_registry.get("previous_champion") and st.button("Rollback to Previous Champion", use_container_width=True):
+        strategy_registry, rolled_back = rollback_champion(strategy_registry)
+        if rolled_back:
+            st.success("Previous champion restored")
+            st.rerun()
 
     champ_col, chall_col = st.columns(2)
     with champ_col:
