@@ -1993,6 +1993,57 @@ if page == "Command Center":
     cc3.metric("Open Trades", int(len(open_trades)))
     cc4.metric("Active Setups", int(signals["signal"].astype(str).isin(["LONG SETUP", "SHORT SETUP"]).sum()) if not signals.empty else 0)
 
+    summary_left, summary_right = st.columns([1.2, 0.8])
+    with summary_left:
+        st.markdown("### Top Setup Right Now")
+        if signals.empty:
+            st.caption("No ranked setup is active at the moment.")
+        else:
+            best_signal = signals.sort_values("score", ascending=False).iloc[0]
+            best_score = int(best_signal["score"])
+            best_verdict = get_setup_verdict(best_score)
+            st.markdown(
+                f"""
+                <div class="top-trade-banner">
+                    <div class="top-trade-kicker">{best_verdict}</div>
+                    <div class="top-trade-grid">
+                        <div class="top-trade-item">
+                            <div class="top-trade-label">Symbol</div>
+                            <div class="top-trade-value">{best_signal["symbol"]}</div>
+                        </div>
+                        <div class="top-trade-item">
+                            <div class="top-trade-label">Signal</div>
+                            <div class="top-trade-value">{best_signal["signal"]}</div>
+                        </div>
+                        <div class="top-trade-item">
+                            <div class="top-trade-label">Score</div>
+                            <div class="top-trade-value">{best_score}</div>
+                        </div>
+                        <div class="top-trade-item">
+                            <div class="top-trade-label">Entry</div>
+                            <div class="top-trade-value">{float(best_signal["entry"]):.4f}</div>
+                        </div>
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+    with summary_right:
+        st.markdown("### Latest Activity")
+        activity1, activity2 = st.columns(2)
+        activity1.metric("New This Refresh", new_logged)
+        activity2.metric("Closed This Refresh", newly_closed)
+        if closed_trades.empty:
+            st.caption("No closed trades recorded yet.")
+        else:
+            last_closed = closed_trades.iloc[-1]
+            st.caption(
+                "Last closed: "
+                f"{last_closed.get('symbol', 'N/A')} | "
+                f"{str(last_closed.get('status', ''))} | "
+                f"${float(pd.to_numeric(last_closed.get('pnl'), errors='coerce') or 0):,.2f}"
+            )
+
     st.markdown("### Active Opportunities")
     if signals.empty:
         st.caption("No active opportunities right now.")
@@ -2195,6 +2246,9 @@ elif page == "Performance":
         )
     backtest_summary = summarize_backtest_results(backtest_trades)
     backtest_curve = create_paper_performance_curve(backtest_trades)
+    closed_trade_pnl = pd.to_numeric(closed_trades["pnl"], errors="coerce").fillna(0.0) if not closed_trades.empty else pd.Series(dtype=float)
+    closed_trade_wins = closed_trade_pnl[closed_trade_pnl > 0]
+    closed_trade_losses = closed_trade_pnl[closed_trade_pnl < 0]
     backtest_summary["out_of_sample_pnl"] = backtest_summary["total_pnl"]
     backtest_summary["out_of_sample_win_rate"] = backtest_summary["win_rate"]
     strategy_registry["champion"]["results_summary"] = backtest_summary
@@ -2246,6 +2300,38 @@ elif page == "Performance":
             style_dashboard_chart(ax_dd, "Backtest Drawdown", "Trade Number", "Drawdown ($)")
             fig_dd.tight_layout(pad=1.2)
             st.pyplot(fig_dd)
+
+    st.markdown("### Closed Trade Analytics")
+    analytics1, analytics2, analytics3, analytics4 = st.columns(4)
+    analytics1.metric("Closed Trades", int(len(closed_trades)))
+    analytics2.metric("Average Win", f"${float(closed_trade_wins.mean()) if not closed_trade_wins.empty else 0.0:,.2f}")
+    analytics3.metric("Average Loss", f"${float(closed_trade_losses.mean()) if not closed_trade_losses.empty else 0.0:,.2f}")
+    analytics4.metric("Realized P&L", f"${float(closed_trade_pnl.sum()) if not closed_trade_pnl.empty else 0.0:,.2f}")
+
+    if closed_trades.empty:
+        st.caption("Closed trade analytics will populate once paper trades complete.")
+    else:
+        closed_trade_table = closed_trades.copy()
+        for col in ["entry", "exit_price", "pnl"]:
+            if col in closed_trade_table.columns:
+                closed_trade_table[col] = pd.to_numeric(closed_trade_table[col], errors="coerce")
+        display_columns = [
+            col for col in [
+                "close_time",
+                "symbol",
+                "signal",
+                "status",
+                "entry",
+                "exit_price",
+                "pnl",
+                "exit_reason",
+            ] if col in closed_trade_table.columns
+        ]
+        st.dataframe(
+            closed_trade_table[display_columns].sort_index(ascending=False),
+            width="stretch",
+            height=240,
+        )
 
     with st.expander("Strategy Lab", expanded=False):
         render_strategy_lab_section(strategy_registry)
@@ -2825,6 +2911,57 @@ elif page == "Market":
         st.rerun()
 
     selected_symbol = st.session_state["live_market_symbol"]
+
+    st.markdown("### Watchlist")
+    watchlist_symbols = ["NVDA", "AAPL", "TSLA", "SPY"]
+    watchlist_snapshot = []
+    if not signals.empty:
+        ranked_signals = signals.sort_values("score", ascending=False).drop_duplicates(subset=["symbol"])
+        for symbol_name in watchlist_symbols:
+            matched = ranked_signals[ranked_signals["symbol"].astype(str) == symbol_name]
+            if matched.empty:
+                watchlist_snapshot.append(
+                    {
+                        "symbol": symbol_name,
+                        "signal": "NO SIGNAL",
+                        "score": 0,
+                        "verdict": "AVOID",
+                    }
+                )
+            else:
+                row = matched.iloc[0]
+                watchlist_snapshot.append(
+                    {
+                        "symbol": symbol_name,
+                        "signal": str(row["signal"]),
+                        "score": int(row["score"]),
+                        "verdict": get_setup_verdict(float(row["score"])),
+                    }
+                )
+    else:
+        for symbol_name in watchlist_symbols:
+            watchlist_snapshot.append(
+                {"symbol": symbol_name, "signal": "NO SIGNAL", "score": 0, "verdict": "AVOID"}
+            )
+
+    watch_cols = st.columns(len(watchlist_snapshot))
+    for idx, snapshot in enumerate(watchlist_snapshot):
+        with watch_cols[idx]:
+            st.markdown(
+                f"""
+                <div class="setup-card {snapshot["verdict"].lower()}">
+                    <div class="setup-card-header">
+                        <div>
+                            <div class="setup-symbol">{snapshot["symbol"]}</div>
+                            <div class="setup-signal">{snapshot["signal"]}</div>
+                        </div>
+                        <div class="setup-badge {snapshot["verdict"].lower()}">{snapshot["verdict"]}</div>
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            st.caption(f"Score: {snapshot['score']}")
 
     market_df = fetch_history(
         selected_symbol,
