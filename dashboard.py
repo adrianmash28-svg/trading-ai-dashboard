@@ -594,8 +594,8 @@ elif page == "MashGPT":
             with st.spinner("MashGPT is analyzing the market..."):
                 reply = ask_mashgpt(prompt, signals, open_trades, closed_trades)
             duration = time.time() - start_time
+            st.caption(f"Done in {duration:.2f}s")
             st.write(reply)
-            st.caption(f"Done in {duration:.2f} seconds")
 
         st.session_state.chat_history.append(("assistant", reply))
 
