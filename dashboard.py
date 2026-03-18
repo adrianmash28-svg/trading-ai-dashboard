@@ -944,7 +944,7 @@ st.markdown(
         border: 1px solid rgba(148, 163, 184, 0.34);
     }
     .block-container {
-        padding-top: 0.85rem;
+        padding-top: 1.45rem;
         padding-bottom: 2.25rem;
         max-width: 1480px;
     }
