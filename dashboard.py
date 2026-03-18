@@ -80,7 +80,7 @@ client = get_openai_client()
 
 def default_strategy_parameters():
     return {
-        "score_threshold": 65,
+        "score_threshold": 70,
         "rsi_long_min": 55,
         "rsi_short_max": 45,
         "rel_vol_min": 1.5,
@@ -180,6 +180,19 @@ def load_strategy_registry():
             "parameters": default_strategy_parameters(),
             "results_summary": {},
             "promotion_status": "Live champion slightly loosened to surface more valid trades",
+            "paper_probation_passed": True,
+            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        save_strategy_registry(registry)
+    if registry["champion"].get("version", 3) < 4:
+        registry["previous_champion"] = registry.get("champion")
+        registry["champion"] = {
+            "id": "champion-v4",
+            "version": 4,
+            "status": "champion",
+            "parameters": default_strategy_parameters(),
+            "results_summary": {},
+            "promotion_status": "Live champion upgraded with stronger entry confirmation and trade quality filters",
             "paper_probation_passed": True,
             "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         }
@@ -548,20 +561,20 @@ def build_signal_snapshot(
     recent_support = float(recent_window["Low"].min())
     recent_resistance = float(recent_window["High"].max())
     recent_range = max(recent_resistance - recent_support, close_price * 0.01)
+    ema_distance_pct = abs(close_price - ema_long) / ema_long if ema_long else 0.0
+    structure_buffer = max(close_price * 0.0015, recent_range * 0.05, 0.05)
+    confirmed_breakout = float(last["High"]) > recent_resistance and close_price > recent_resistance
+    confirmed_breakdown = float(last["Low"]) < recent_support and close_price < recent_support
 
     long_score = 0
     short_score = 0
 
-    trend_up = ema_short > ema_long and close_price > ema_long
-    trend_down = ema_short < ema_long and close_price < ema_long
+    trend_up = ema_short > ema_long and close_price > ema_long and ema_distance_pct >= 0.005
+    trend_down = ema_short < ema_long and close_price < ema_long and ema_distance_pct >= 0.005
     if trend_up:
         long_score += params["trend_weight"]
-    elif close_price > ema_long:
-        long_score += 10
     if trend_down:
         short_score += params["trend_weight"]
-    elif close_price < ema_long:
-        short_score += 10
 
     if params["rsi_long_min"] <= rsi14 <= 72 and rsi14 >= prev_rsi:
         long_score += params["momentum_weight"]
@@ -579,11 +592,11 @@ def build_signal_snapshot(
         long_score += params["volume_weight"]
         short_score += params["volume_weight"]
 
-    breakout_level = recent_resistance * 0.997
-    breakdown_level = recent_support * 1.003
-    if close_price >= breakout_level:
+    breakout_level = recent_resistance
+    breakdown_level = recent_support
+    if confirmed_breakout:
         long_score += params["structure_weight"]
-    if close_price <= breakdown_level:
+    if confirmed_breakdown:
         short_score += params["structure_weight"]
 
     if change_pct >= 0.6:
@@ -595,8 +608,10 @@ def build_signal_snapshot(
     elif change_pct <= -0.3:
         short_score += 5
 
-    long_risk = max(close_price - recent_support, close_price * 0.004, 0.25)
-    short_risk = max(recent_resistance - close_price, close_price * 0.004, 0.25)
+    long_stop_base = recent_support - structure_buffer
+    short_stop_base = recent_resistance + structure_buffer
+    long_risk = max(close_price - long_stop_base, close_price * 0.004, 0.25)
+    short_risk = max(short_stop_base - close_price, close_price * 0.004, 0.25)
     long_projected_target = recent_resistance + (recent_range * 0.35)
     short_projected_target = recent_support - (recent_range * 0.35)
     long_reward = max(long_projected_target - close_price, 0.0)
@@ -620,7 +635,7 @@ def build_signal_snapshot(
         trend_up,
         rsi14 > params["rsi_long_min"],
         rel_vol >= params["rel_vol_min"],
-        close_price >= breakout_level,
+        confirmed_breakout,
         long_rr >= 2.0,
     )
     short_reason = build_trade_reason(
@@ -628,25 +643,25 @@ def build_signal_snapshot(
         trend_down,
         rsi14 < params["rsi_short_max"],
         rel_vol >= params["rel_vol_min"],
-        close_price <= breakdown_level,
+        confirmed_breakdown,
         short_rr >= 2.0,
     )
     timeframe = "15m"
     snapshot_timestamp = str(work_df.index[-1])
 
-    if long_score >= short_score and long_score >= params["score_threshold"] and trend_up and rel_vol >= params["rel_vol_min"] and rsi14 > params["rsi_long_min"] and long_rr >= 2.0 and allow_long:
+    if long_score >= short_score and long_score >= params["score_threshold"] and trend_up and rel_vol >= params["rel_vol_min"] and rsi14 > params["rsi_long_min"] and long_rr >= 2.0 and confirmed_breakout and allow_long:
         signal = "LONG SETUP"
         score = long_score
         risk = long_risk * params["stop_multiplier"]
-        stop_loss = round(close_price - risk, 4)
+        stop_loss = round(long_stop_base, 4)
         tp1 = round(close_price + max(risk * params["tp1_multiplier"], recent_range * 0.2), 4)
         tp2 = round(close_price + max(risk * params["tp2_multiplier"], recent_range * 0.35), 4)
         reason = long_reason
-    elif short_score > long_score and short_score >= params["score_threshold"] and trend_down and rel_vol >= params["rel_vol_min"] and rsi14 < params["rsi_short_max"] and short_rr >= 2.0 and allow_short:
+    elif short_score > long_score and short_score >= params["score_threshold"] and trend_down and rel_vol >= params["rel_vol_min"] and rsi14 < params["rsi_short_max"] and short_rr >= 2.0 and confirmed_breakdown and allow_short:
         signal = "SHORT SETUP"
         score = short_score
         risk = short_risk * params["stop_multiplier"]
-        stop_loss = round(close_price + risk, 4)
+        stop_loss = round(short_stop_base, 4)
         tp1 = round(close_price - max(risk * params["tp1_multiplier"], recent_range * 0.2), 4)
         tp2 = round(close_price - max(risk * params["tp2_multiplier"], recent_range * 0.35), 4)
         reason = short_reason
@@ -2084,7 +2099,7 @@ strategy_registry = load_strategy_registry()
 strategy_registry = maybe_run_controlled_research_loop(strategy_registry)
 algo_update_info = maybe_send_algorithm_status_update(strategy_registry)
 if "trading_mode" not in st.session_state:
-    st.session_state.trading_mode = "Manual"
+    st.session_state.trading_mode = "Auto"
 
 with st.sidebar:
     st.markdown(
@@ -2170,19 +2185,17 @@ if st.sidebar.button("Send Test SMS", use_container_width=True):
     st.sidebar.caption(f"Gateway address: {VERIZON_SMS_GATEWAY}")
 
 
-st.markdown(
-    f"""
-    <div class="app-hero">
-        <div class="app-kicker">Mash Terminal</div>
-        <div class="app-title">A sharper command layer for realtime trading signals, paper execution, and market intelligence.</div>
-        <div class="app-subtitle">Track the best setup, monitor paper performance, and move from signal to decision inside one polished trading workspace. Last refreshed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
-
-
 if page == "Home":
+    st.markdown(
+        f"""
+        <div class="app-hero">
+            <div class="app-kicker">Mash Terminal</div>
+            <div class="app-title">A sharper command layer for realtime trading signals, paper execution, and market intelligence.</div>
+            <div class="app-subtitle">Track the best setup, monitor paper performance, and move from signal to decision inside one polished trading workspace. Last refreshed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
     render_page_header(
         "Profit Command Center",
         "Stay focused on profit, trade status, and the next action that matters.",
