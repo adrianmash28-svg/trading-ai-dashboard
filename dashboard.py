@@ -7,6 +7,7 @@ import requests
 import streamlit as st
 import streamlit.components.v1 as components
 import yfinance as yf
+from streamlit_autorefresh import st_autorefresh
 
 try:
     from openai import OpenAI
@@ -532,40 +533,16 @@ elif page == "MashGPT":
 
 elif page == "Live Market":
     st.markdown("## Live Market")
+    st_autorefresh(interval=5000, key="live_market_refresh")
 
     if "live_market_symbol" not in st.session_state:
         st.session_state["live_market_symbol"] = "NVDA"
 
-    watchlist = ["AAPL", "NVDA", "META", "MSFT", "TSLA", "AMZN", "SPY", "QQQ"]
+    timeframe = "60"
+    selected_symbol = st.session_state["live_market_symbol"]
 
     # ---------------- TOP: MARKET PANEL ----------------
     st.markdown("### Market Panel")
-
-    top1, top2, top3 = st.columns([1.2, 1.2, 1.6])
-
-    with top1:
-        selected_symbol = st.selectbox(
-            "Ticker",
-            options=watchlist,
-            index=watchlist.index(st.session_state.get("live_market_symbol", "NVDA"))
-            if st.session_state.get("live_market_symbol", "NVDA") in watchlist
-            else 0,
-        )
-
-    with top2:
-        timeframe = st.selectbox(
-            "Timeframe",
-            ["1", "5", "15", "30", "60", "D", "W"],
-            index=4,
-        )
-
-    with top3:
-        custom_symbol = st.text_input("Search ticker", value=selected_symbol).upper().strip()
-
-    if custom_symbol:
-        selected_symbol = custom_symbol
-
-    st.session_state["live_market_symbol"] = selected_symbol
 
     quick1, quick2, quick3, quick4 = st.columns(4)
     if quick1.button("NVDA", use_container_width=True):
@@ -581,13 +558,15 @@ elif page == "Live Market":
         st.session_state["live_market_symbol"] = "SPY"
         st.rerun()
 
+    selected_symbol = st.session_state["live_market_symbol"]
+
     market_df = fetch_history(
         selected_symbol,
         period="6mo" if timeframe in ["D", "W"] else "5d",
         interval="1d" if timeframe in ["D", "W"] else "15m",
     )
 
-    st.markdown("---")
+    st.markdown("")
 
     # ---------------- MIDDLE: BIG CHART ----------------
     st.markdown(f"### {selected_symbol} Chart")
@@ -618,9 +597,12 @@ elif page == "Live Market":
     </script>
     """
 
-    components.html(tradingview_html, height=1020)
+    chart_left, chart_center, chart_right = st.columns([0.08, 0.84, 0.08])
+    with chart_center:
+        components.html(tradingview_html, height=1020)
 
-    st.markdown("---")
+    st.markdown("")
+    st.markdown("")
 
     # ---------------- BOTTOM: STATS ----------------
     st.markdown("### Stats")
@@ -633,14 +615,18 @@ elif page == "Live Market":
         high_val = float(market_df["High"].max())
         low_val = float(market_df["Low"].min())
 
-        s1, s2, s3, s4, s5 = st.columns(5)
-        s1.metric("Last", f"{latest_close:.2f}")
-        s2.metric("Change %", f"{change_pct:.2f}%")
-        s3.metric("High", f"{high_val:.2f}")
-        s4.metric("Low", f"{low_val:.2f}")
-        s5.metric("Volume", f"{latest_volume:,}")
+        stats_left, stats_center, stats_right = st.columns([0.04, 0.92, 0.04])
+        with stats_center:
+            s1, s2, s3, s4, s5 = st.columns(5)
+            s1.metric("Last", f"{latest_close:.2f}")
+            s2.metric("Change %", f"{change_pct:.2f}%")
+            s3.metric("High", f"{high_val:.2f}")
+            s4.metric("Low", f"{low_val:.2f}")
+            s5.metric("Volume", f"{latest_volume:,}")
     else:
         st.warning(f"No data found for {selected_symbol}")
+
+    st.markdown("")
 
     with st.expander("Show raw market data"):
         if not market_df.empty:
