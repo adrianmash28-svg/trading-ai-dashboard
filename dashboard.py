@@ -1431,6 +1431,81 @@ def render_page_header(title: str, subtitle: str, eyebrow: str = "Workspace"):
     )
 
 
+def render_trade_insights_section(trade_log: pd.DataFrame):
+    st.markdown("### Trade Insights")
+    if trade_log.empty:
+        st.caption("Trade insights will populate after completed trades are recorded.")
+        return
+
+    insights_log = trade_log.copy()
+    insights_log["pnl"] = pd.to_numeric(insights_log["pnl"], errors="coerce").fillna(0.0)
+    insights_log["score"] = pd.to_numeric(insights_log["score"], errors="coerce").fillna(0.0)
+    insights_log["result"] = insights_log["result"].astype(str).str.lower()
+    insights_log["reason"] = insights_log["reason"].replace("", "Unspecified").fillna("Unspecified")
+    insights_log["timeframe"] = insights_log["timeframe"].replace("", "Unknown").fillna("Unknown")
+    insights_log["score_range"] = pd.cut(
+        insights_log["score"],
+        bins=[-0.1, 50, 70, float("inf")],
+        labels=["0-50", "50-70", "70+"],
+        include_lowest=True,
+    )
+
+    insights1, insights2 = st.columns([0.8, 1.2])
+    insights1.metric("Average P&L / Trade", f"${float(insights_log['pnl'].mean()):,.2f}")
+    reason_win_rates = (
+        insights_log.groupby("reason", dropna=False)["result"]
+        .apply(lambda s: round((s == "win").mean() * 100, 2))
+        .reset_index(name="win_rate_pct")
+        .sort_values(["win_rate_pct", "reason"], ascending=[False, True])
+    )
+    with insights2:
+        st.caption("Win Rate by Reason")
+        st.dataframe(reason_win_rates, width="stretch", height=180)
+
+    score_win_rates = (
+        insights_log.groupby("score_range", dropna=False)["result"]
+        .apply(lambda s: round((s == "win").mean() * 100, 2))
+        .reset_index(name="win_rate_pct")
+    )
+    timeframe_totals = (
+        insights_log.groupby("timeframe", dropna=False)
+        .size()
+        .reset_index(name="total_trades")
+        .sort_values(["total_trades", "timeframe"], ascending=[False, True])
+    )
+
+    insight_col1, insight_col2 = st.columns(2)
+    with insight_col1:
+        st.caption("Win Rate by Score Range")
+        st.dataframe(score_win_rates, width="stretch", height=160)
+    with insight_col2:
+        st.caption("Total Trades by Timeframe")
+        st.dataframe(timeframe_totals, width="stretch", height=160)
+
+    display_columns = [
+        col for col in [
+            "close_time",
+            "symbol",
+            "timeframe",
+            "signal",
+            "reason",
+            "score",
+            "result",
+            "status",
+            "entry",
+            "exit_price",
+            "pnl",
+            "exit_reason",
+        ] if col in insights_log.columns
+    ]
+    st.caption("Completed Trades")
+    st.dataframe(
+        insights_log[display_columns].sort_values("close_time", ascending=False, na_position="last"),
+        width="stretch",
+        height=260,
+    )
+
+
 def render_strategy_lab_section(strategy_registry):
     if not strategy_registry["champion"].get("results_summary"):
         _, champion_summary, _ = run_validation_split(BACKTEST_SYMBOLS, strategy_registry["champion"]["parameters"])
@@ -1981,7 +2056,7 @@ total_pnl = round(float(performance["pnl"].sum()), 2)
 
 page = st.sidebar.radio(
     "Workspace",
-    ["Command Center", "Performance", "Market", "MashGPT", "About"],
+    ["Home", "Performance", "Trade Insights", "Market", "MashGPT", "About"],
 )
 
 st.sidebar.markdown("---")
@@ -2032,9 +2107,9 @@ st.markdown(
 )
 
 
-if page == "Command Center":
+if page == "Home":
     render_page_header(
-        "Command Center",
+        "Home",
         "A focused overview of performance, open risk, active opportunities, and algorithm status.",
         "Home",
     )
@@ -2091,9 +2166,8 @@ if page == "Command Center":
             )
     with summary_right:
         st.markdown("### Latest Activity")
-        activity1, activity2 = st.columns(2)
-        activity1.metric("New This Refresh", new_logged)
-        activity2.metric("Closed This Refresh", newly_closed)
+        st.metric("New This Refresh", new_logged)
+        st.metric("Closed This Refresh", newly_closed)
         if closed_trades.empty:
             st.caption("No closed trades recorded yet.")
         else:
@@ -2389,58 +2463,18 @@ elif page == "Performance":
             height=240,
         )
 
-    st.markdown("### Trade Insights")
-    if trade_log.empty:
-        st.caption("Trade insights will populate after completed trades are recorded.")
-    else:
-        insights_log = trade_log.copy()
-        insights_log["pnl"] = pd.to_numeric(insights_log["pnl"], errors="coerce").fillna(0.0)
-        insights_log["score"] = pd.to_numeric(insights_log["score"], errors="coerce").fillna(0.0)
-        insights_log["result"] = insights_log["result"].astype(str).str.lower()
-        insights_log["reason"] = insights_log["reason"].replace("", "Unspecified").fillna("Unspecified")
-        insights_log["timeframe"] = insights_log["timeframe"].replace("", "Unknown").fillna("Unknown")
-        insights_log["score_range"] = pd.cut(
-            insights_log["score"],
-            bins=[-0.1, 50, 70, float("inf")],
-            labels=["0-50", "50-70", "70+"],
-            include_lowest=True,
-        )
-
-        insights1, insights2 = st.columns([0.8, 1.2])
-        insights1.metric("Average P&L / Trade", f"${float(insights_log['pnl'].mean()):,.2f}")
-        with insights2:
-            st.caption("Win Rate by Reason")
-        reason_win_rates = (
-            insights_log.groupby("reason", dropna=False)["result"]
-            .apply(lambda s: round((s == "win").mean() * 100, 2))
-            .reset_index(name="win_rate_pct")
-            .sort_values(["win_rate_pct", "reason"], ascending=[False, True])
-        )
-        score_win_rates = (
-            insights_log.groupby("score_range", dropna=False)["result"]
-            .apply(lambda s: round((s == "win").mean() * 100, 2))
-            .reset_index(name="win_rate_pct")
-        )
-        timeframe_totals = (
-            insights_log.groupby("timeframe", dropna=False)
-            .size()
-            .reset_index(name="total_trades")
-            .sort_values(["total_trades", "timeframe"], ascending=[False, True])
-        )
-
-        with insights2:
-            st.dataframe(reason_win_rates, width="stretch", height=180)
-
-        insight_col1, insight_col2 = st.columns(2)
-        with insight_col1:
-            st.caption("Win Rate by Score Range")
-            st.dataframe(score_win_rates, width="stretch", height=160)
-        with insight_col2:
-            st.caption("Total Trades by Timeframe")
-            st.dataframe(timeframe_totals, width="stretch", height=160)
+    st.caption("Open Trade Insights for the setup-quality breakdown and completed-trade metadata view.")
 
     with st.expander("Strategy Lab", expanded=False):
         render_strategy_lab_section(strategy_registry)
+
+elif page == "Trade Insights":
+    render_page_header(
+        "Trade Insights",
+        "Understand which setups actually work by reviewing completed trades, quality signals, and outcome patterns.",
+        "Analytics",
+    )
+    render_trade_insights_section(trade_log)
 
 elif page == "Strategy Lab":
     st.stop()
@@ -2911,46 +2945,6 @@ elif page == "MashGPT":
         "Ask for trader-focused readouts on live setups, risk, and market context with faster feedback.",
         "Market Intelligence",
     )
-
-    if signals is not None and not signals.empty:
-        best_signal = signals.sort_values("score", ascending=False).iloc[0]
-
-        score_val = int(best_signal["score"])
-        if score_val >= 70:
-            confidence = "High Confidence"
-        elif score_val >= 50:
-            confidence = "Medium Confidence"
-        else:
-            confidence = "Low Confidence"
-
-        st.markdown("### Top Trade Card")
-
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Best Setup", str(best_signal["symbol"]))
-        c2.metric("Score", score_val)
-        c3.metric("Confidence", confidence)
-
-        c4, c5, c6, c7 = st.columns(4)
-        c4.metric("Entry", best_signal["entry"])
-        c5.metric("Stop", best_signal["stop_loss"])
-        c6.metric("TP1", best_signal["take_profit_1"])
-        c7.metric("TP2", best_signal["take_profit_2"])
-
-        if score_val >= 70:
-            verdict = "🔥 TAKE"
-            reason = "Strong setup, good momentum and risk/reward."
-        elif score_val >= 50:
-            verdict = "⚠️ WATCH"
-            reason = "Decent setup but not the strongest."
-        else:
-            verdict = "❌ AVOID"
-            reason = "Weak setup, low probability."
-
-        st.markdown(f"### {verdict}")
-        st.write(reason)
-        st.markdown("---")
-    else:
-        st.info("No live setup available right now.")
 
     if "chat_history" not in st.session_state:
         st.session_state.chat_history = [
