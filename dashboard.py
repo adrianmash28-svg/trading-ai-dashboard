@@ -700,8 +700,32 @@ st.markdown(
 
 symbols = DEFAULT_SYMBOLS
 paper = load_paper_trades()
+if "trading_mode" not in st.session_state:
+    st.session_state.trading_mode = "Manual"
+
+with st.sidebar:
+    st.markdown(
+        """
+        <div class="sidebar-shell">
+            <div class="sidebar-kicker">Mash Trading</div>
+            <div class="sidebar-title">Terminal</div>
+            <div class="sidebar-copy">Live signals, paper execution, and market monitoring in one workspace.</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    selected_mode = st.segmented_control(
+        "Trading Mode",
+        options=["Manual", "Auto"],
+        default=st.session_state.trading_mode,
+        key="trading_mode_selector",
+    )
+    if selected_mode is not None:
+        st.session_state.trading_mode = selected_mode
+
+trading_mode = st.session_state.trading_mode
 signals = calc_live_signals(symbols)
-paper, new_logged = log_active_signals(signals, paper)
+paper, new_logged = log_active_signals(signals, paper) if trading_mode == "Auto" else (paper, 0)
 paper, newly_closed = update_open_trades(paper)
 save_paper_trades(paper)
 
@@ -715,16 +739,6 @@ win_rate = round((performance["pnl"] > 0).mean() * 100, 2) if not closed_trades.
 total_pnl = round(float(performance["pnl"].sum()), 2)
 
 
-st.sidebar.markdown(
-    """
-    <div class="sidebar-shell">
-        <div class="sidebar-kicker">Mash Trading</div>
-        <div class="sidebar-title">Terminal</div>
-        <div class="sidebar-copy">Live signals, paper execution, and market monitoring in one workspace.</div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
 page = st.sidebar.radio(
     "Navigate",
     ["Dashboard", "Setups", "Live Signals", "Paper Trades", "MashGPT", "Live Market"],
@@ -735,6 +749,10 @@ st.sidebar.markdown('<div class="sidebar-section-label">System</div>', unsafe_al
 st.sidebar.markdown(
     f"""
     <div class="sidebar-info-card">
+        <div class="sidebar-info-row">
+            <div class="sidebar-info-label">Trading Mode</div>
+            <div class="sidebar-info-value">{trading_mode}</div>
+        </div>
         <div class="sidebar-info-row">
             <div class="sidebar-info-label">Watchlist</div>
             <div class="sidebar-info-value">{', '.join(symbols)}</div>
