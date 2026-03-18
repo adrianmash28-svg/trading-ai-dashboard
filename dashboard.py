@@ -1021,13 +1021,15 @@ def build_sample_algo_update_message(summary, changed):
     win_rate_value = float(summary.get("win_rate", 58.2))
     trades_value = int(summary.get("num_trades", 42))
     current_time = datetime.now(APP_TIMEZONE).strftime("%-I:%M %p")
+    pnl_prefix = "+" if pnl_value >= 0 else "-"
+    status_label = "UPDATED" if changed else "STABLE"
     return (
-        "Algo Update:\n"
-        f"P&L: ${pnl_value:.2f}\n"
+        "📊 Algo Update\n\n"
+        f"P&L: {pnl_prefix}${abs(pnl_value):.2f}\n"
         f"Win Rate: {win_rate_value:.1f}%\n"
         f"Trades: {trades_value}\n"
-        f"Changed: {'Yes' if changed else 'No'}\n"
-        f"Time: {current_time}"
+        f"Status: {status_label}\n\n"
+        f"⏱ {current_time}"
     )
 
 
