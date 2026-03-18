@@ -1,6 +1,8 @@
 import os
+import smtplib
 import time
 from datetime import datetime
+from email.message import EmailMessage
 
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -29,11 +31,9 @@ def get_secret(name: str, default: str = "") -> str:
 
 
 OPENAI_API_KEY = get_secret("OPENAI_API_KEY", "")
-TWILIO_ACCOUNT_SID = get_secret("TWILIO_ACCOUNT_SID", "")
-TWILIO_AUTH_TOKEN = get_secret("TWILIO_AUTH_TOKEN", "")
-TWILIO_FROM_NUMBER = get_secret("TWILIO_FROM_NUMBER", "")
+EMAIL_SENDER = get_secret("EMAIL_SENDER", "")
+EMAIL_PASSWORD = get_secret("EMAIL_PASSWORD", "")
 ALERT_TO_NUMBER = get_secret("ALERT_TO_NUMBER", "")
-TWILIO_VERIFY_SERVICE_SID = get_secret("TWILIO_VERIFY_SERVICE_SID", "")
 POLYGON_API_KEY = get_secret("ypKE7G5kgwYcGEPApyKMWjpgp4JGpCTT", "")
 
 PAPER_TRADES_FILE = "paper_trades.csv"
@@ -53,27 +53,50 @@ def get_openai_client():
 client = get_openai_client()
 
 
+def get_sms_gateway_address(value: str) -> str:
+    raw_value = str(value).strip()
+    if not raw_value:
+        return ""
+    if "@" in raw_value:
+        return raw_value
+    digits = "".join(ch for ch in raw_value if ch.isdigit())
+    if not digits:
+        return ""
+    return f"{digits}@vtext.com"
+
+
+def get_smtp_settings(sender: str):
+    domain = sender.split("@")[-1].lower() if "@" in sender else ""
+    if domain in {"gmail.com", "googlemail.com"}:
+        return "smtp.gmail.com", 587
+    if domain in {"outlook.com", "hotmail.com", "live.com", "office365.com"}:
+        return "smtp.office365.com", 587
+    if domain in {"yahoo.com", "ymail.com"}:
+        return "smtp.mail.yahoo.com", 587
+    if domain in {"icloud.com", "me.com", "mac.com"}:
+        return "smtp.mail.me.com", 587
+    return "smtp.gmail.com", 587
+
+
 def send_sms_alert(message: str):
-    if not all([TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, ALERT_TO_NUMBER, TWILIO_VERIFY_SERVICE_SID]):
-        return False, "Missing Twilio Verify credentials"
+    if not all([EMAIL_SENDER, EMAIL_PASSWORD, ALERT_TO_NUMBER]):
+        return False, "Missing email SMS credentials"
+    sms_gateway_address = get_sms_gateway_address(ALERT_TO_NUMBER)
+    if not sms_gateway_address:
+        return False, "Invalid ALERT_TO_NUMBER"
     try:
-        response = requests.post(
-            f"https://verify.twilio.com/v2/Services/{TWILIO_VERIFY_SERVICE_SID}/Verifications",
-            auth=(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN),
-            data={
-                "To": ALERT_TO_NUMBER,
-                "Channel": "sms",
-            },
-            timeout=10,
-        )
-        if response.ok:
-            return True, ""
-        try:
-            error_data = response.json()
-            error_message = error_data.get("message") or error_data.get("detail") or response.text
-        except Exception:
-            error_message = response.text or f"HTTP {response.status_code}"
-        return False, str(error_message).strip()
+        smtp_host, smtp_port = get_smtp_settings(EMAIL_SENDER)
+        email_message = EmailMessage()
+        email_message["From"] = EMAIL_SENDER
+        email_message["To"] = sms_gateway_address
+        email_message["Subject"] = ""
+        email_message.set_content(str(message).strip()[:160])
+
+        with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as server:
+            server.starttls()
+            server.login(EMAIL_SENDER, EMAIL_PASSWORD)
+            server.send_message(email_message)
+        return True, ""
     except Exception as e:
         return False, str(e).strip()
 
@@ -789,7 +812,7 @@ st.sidebar.markdown(
         </div>
         <div class="sidebar-info-row">
             <div class="sidebar-info-label">SMS Alerts</div>
-            <div class="sidebar-info-value">{'On' if all([TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER, ALERT_TO_NUMBER]) else 'Off'}</div>
+            <div class="sidebar-info-value">{'On' if all([EMAIL_SENDER, EMAIL_PASSWORD, ALERT_TO_NUMBER]) else 'Off'}</div>
         </div>
     </div>
     """,
@@ -801,10 +824,10 @@ if st.sidebar.button("Send Test SMS", use_container_width=True):
         st.sidebar.success("Test SMS sent")
     else:
         st.sidebar.error(f"Test SMS could not be sent{f': {sms_error}' if sms_error else ''}")
-    st.sidebar.caption(f"TWILIO_ACCOUNT_SID set: {'Yes' if bool(TWILIO_ACCOUNT_SID) else 'No'}")
-    st.sidebar.caption(f"TWILIO_AUTH_TOKEN set: {'Yes' if bool(TWILIO_AUTH_TOKEN) else 'No'}")
-    st.sidebar.caption(f"TWILIO_FROM_NUMBER: {TWILIO_FROM_NUMBER or '(missing)'}")
+    st.sidebar.caption(f"EMAIL_SENDER set: {'Yes' if bool(EMAIL_SENDER) else 'No'}")
+    st.sidebar.caption(f"EMAIL_PASSWORD set: {'Yes' if bool(EMAIL_PASSWORD) else 'No'}")
     st.sidebar.caption(f"ALERT_TO_NUMBER: {ALERT_TO_NUMBER or '(missing)'}")
+    st.sidebar.caption(f"SMS gateway address: {get_sms_gateway_address(ALERT_TO_NUMBER) or '(invalid)'}")
 
 
 st.title("Mash Trading Dashboard")
