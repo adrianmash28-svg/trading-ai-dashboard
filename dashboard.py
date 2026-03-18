@@ -342,6 +342,14 @@ def create_paper_performance_curve(closed_trades_df: pd.DataFrame):
     return trades
 
 
+def get_setup_verdict(score: float) -> str:
+    if score >= 70:
+        return "TAKE"
+    if score >= 50:
+        return "WATCH"
+    return "AVOID"
+
+
 def ask_mashgpt(prompt: str, signals_df: pd.DataFrame, open_trades_df: pd.DataFrame, closed_trades_df: pd.DataFrame):
     if not client:
         return "OpenAI key is not connected."
@@ -471,6 +479,70 @@ st.markdown(
         color: #f8fafc;
         font-size: 1.1rem;
         font-weight: 700;
+    }
+    .setup-card {
+        border-radius: 18px;
+        padding: 16px 18px;
+        margin: 0.75rem 0;
+        border: 1px solid rgba(71, 85, 105, 0.45);
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+    }
+    .setup-card.take {
+        background: linear-gradient(135deg, rgba(20, 83, 45, 0.32) 0%, rgba(15, 23, 42, 0.96) 100%);
+        border-color: rgba(34, 197, 94, 0.85);
+    }
+    .setup-card.watch {
+        background: linear-gradient(135deg, rgba(120, 53, 15, 0.28) 0%, rgba(15, 23, 42, 0.96) 100%);
+        border-color: rgba(251, 191, 36, 0.72);
+    }
+    .setup-card.avoid {
+        background: linear-gradient(135deg, rgba(51, 65, 85, 0.38) 0%, rgba(15, 23, 42, 0.94) 100%);
+        border-color: rgba(100, 116, 139, 0.55);
+        opacity: 0.92;
+    }
+    .setup-card-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        margin-bottom: 0.85rem;
+    }
+    .setup-symbol {
+        color: #f8fafc;
+        font-size: 1.35rem;
+        font-weight: 800;
+        letter-spacing: 0.02em;
+    }
+    .setup-signal {
+        color: #94a3b8;
+        font-size: 0.86rem;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        margin-top: 0.18rem;
+    }
+    .setup-badge {
+        border-radius: 999px;
+        padding: 0.32rem 0.75rem;
+        font-size: 0.78rem;
+        font-weight: 800;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        display: inline-block;
+    }
+    .setup-badge.take {
+        background: rgba(34, 197, 94, 0.18);
+        color: #86efac;
+        border: 1px solid rgba(34, 197, 94, 0.45);
+    }
+    .setup-badge.watch {
+        background: rgba(251, 191, 36, 0.18);
+        color: #fde68a;
+        border: 1px solid rgba(251, 191, 36, 0.42);
+    }
+    .setup-badge.avoid {
+        background: rgba(148, 163, 184, 0.14);
+        color: #cbd5e1;
+        border: 1px solid rgba(148, 163, 184, 0.34);
     }
     .block-container {
         padding-top: 1rem;
@@ -607,17 +679,12 @@ elif page == "Setups":
         sorted_signals = signals.sort_values("score", ascending=False).reset_index(drop=True)
         best_setup = sorted_signals.iloc[0]
         best_score = int(best_setup["score"])
-        if best_score >= 70:
-            verdict = "TAKE"
-        elif best_score >= 50:
-            verdict = "WATCH"
-        else:
-            verdict = "AVOID"
+        verdict = get_setup_verdict(best_score)
 
         st.markdown(
             f"""
             <div class="top-trade-banner">
-                <div class="top-trade-kicker">Best Setup</div>
+                <div class="top-trade-kicker">Top Setup</div>
                 <div class="top-trade-grid">
                     <div class="top-trade-item">
                         <div class="top-trade-label">Symbol</div>
@@ -644,14 +711,50 @@ elif page == "Setups":
                         <div class="top-trade-value">{best_setup["take_profit_2"]}</div>
                     </div>
                 </div>
-                <div class="top-trade-kicker" style="margin-top: 0.9rem; margin-bottom: 0;">Verdict: {verdict}</div>
+                <div class="top-trade-kicker" style="margin-top: 0.9rem; margin-bottom: 0;">Verdict: {verdict} | Signal: {best_setup["signal"]}</div>
             </div>
             """,
             unsafe_allow_html=True,
         )
 
-        st.markdown("### All Setups")
-        st.dataframe(sorted_signals, width="stretch", height=420)
+        st.markdown("### Score Overview")
+        score_chart = sorted_signals[["symbol", "score"]].copy().set_index("symbol")
+        st.bar_chart(score_chart, height=220)
+
+        st.markdown("### Ranked Setups")
+        for _, setup in sorted_signals.iterrows():
+            score = int(setup["score"])
+            setup_verdict = get_setup_verdict(score)
+            verdict_class = setup_verdict.lower()
+
+            st.markdown(
+                f"""
+                <div class="setup-card {verdict_class}">
+                    <div class="setup-card-header">
+                        <div>
+                            <div class="setup-symbol">{setup["symbol"]}</div>
+                            <div class="setup-signal">{setup["signal"]}</div>
+                        </div>
+                        <div class="setup-badge {verdict_class}">{setup_verdict}</div>
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+            top_metrics = st.columns(4)
+            top_metrics[0].metric("Score", score)
+            top_metrics[1].metric("Entry", f'{float(setup["entry"]):.4f}')
+            top_metrics[2].metric("Stop", f'{float(setup["stop_loss"]):.4f}')
+            top_metrics[3].metric("Rel Vol", f'{float(setup["rel_vol"]):.2f}x')
+
+            bottom_metrics = st.columns(4)
+            bottom_metrics[0].metric("TP1", f'{float(setup["take_profit_1"]):.4f}')
+            bottom_metrics[1].metric("TP2", f'{float(setup["take_profit_2"]):.4f}')
+            bottom_metrics[2].metric("Change %", f'{float(setup["change_pct"]):.2f}%')
+            bottom_metrics[3].metric("Signal", str(setup["signal"]))
+
+            st.markdown("")
 
 elif page == "Paper Trades":
     st.subheader("Open Paper Trades")
