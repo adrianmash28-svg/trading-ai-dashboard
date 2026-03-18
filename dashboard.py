@@ -501,7 +501,7 @@ total_pnl = round(float(performance["pnl"].sum()), 2)
 st.sidebar.title("📊 Navigation")
 page = st.sidebar.radio(
     "Go to",
-    ["Dashboard", "Live Signals", "Paper Trades", "MashGPT", "Live Market"],
+    ["Dashboard", "Setups", "Live Signals", "Paper Trades", "MashGPT", "Live Market"],
 )
 
 st.sidebar.markdown("---")
@@ -598,6 +598,60 @@ elif page == "Live Signals":
         st.info("No live signals right now.")
     else:
         st.dataframe(signals, width="stretch", height=420)
+
+elif page == "Setups":
+    st.subheader("Setups")
+    if signals.empty:
+        st.info("No setups available right now.")
+    else:
+        sorted_signals = signals.sort_values("score", ascending=False).reset_index(drop=True)
+        best_setup = sorted_signals.iloc[0]
+        best_score = int(best_setup["score"])
+        if best_score >= 70:
+            verdict = "TAKE"
+        elif best_score >= 50:
+            verdict = "WATCH"
+        else:
+            verdict = "AVOID"
+
+        st.markdown(
+            f"""
+            <div class="top-trade-banner">
+                <div class="top-trade-kicker">Best Setup</div>
+                <div class="top-trade-grid">
+                    <div class="top-trade-item">
+                        <div class="top-trade-label">Symbol</div>
+                        <div class="top-trade-value">{best_setup["symbol"]}</div>
+                    </div>
+                    <div class="top-trade-item">
+                        <div class="top-trade-label">Score</div>
+                        <div class="top-trade-value">{best_score}</div>
+                    </div>
+                    <div class="top-trade-item">
+                        <div class="top-trade-label">Entry</div>
+                        <div class="top-trade-value">{best_setup["entry"]}</div>
+                    </div>
+                    <div class="top-trade-item">
+                        <div class="top-trade-label">Stop</div>
+                        <div class="top-trade-value">{best_setup["stop_loss"]}</div>
+                    </div>
+                    <div class="top-trade-item">
+                        <div class="top-trade-label">TP1</div>
+                        <div class="top-trade-value">{best_setup["take_profit_1"]}</div>
+                    </div>
+                    <div class="top-trade-item">
+                        <div class="top-trade-label">TP2</div>
+                        <div class="top-trade-value">{best_setup["take_profit_2"]}</div>
+                    </div>
+                </div>
+                <div class="top-trade-kicker" style="margin-top: 0.9rem; margin-bottom: 0;">Verdict: {verdict}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        st.markdown("### All Setups")
+        st.dataframe(sorted_signals, width="stretch", height=420)
 
 elif page == "Paper Trades":
     st.subheader("Open Paper Trades")
