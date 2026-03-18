@@ -144,6 +144,7 @@ def ensure_paper_trades_file():
         "take_profit_2",
         "shares",
         "score",
+        "signal",
         "status",
         "pnl",
         "exit_price",
@@ -240,47 +241,92 @@ def calc_live_signals(symbols):
         recent_resistance = float(recent_window["High"].max())
         recent_range = max(recent_resistance - recent_support, close_price * 0.01)
 
-        score = 0
-        trend_down = ema20 < ema50 and close_price < ema20
-        if trend_down:
-            score += 30
-        elif close_price < ema20:
-            score += 10
+        long_score = 0
+        short_score = 0
 
-        if 35 <= rsi14 <= 55 and rsi14 <= prev_rsi:
-            score += 18
-        elif rsi14 < 35:
-            score += 8
+        trend_up = ema20 > ema50 and close_price > ema20
+        trend_down = ema20 < ema50 and close_price < ema20
+        if trend_up:
+            long_score += 30
+        elif close_price > ema20:
+            long_score += 10
+        if trend_down:
+            short_score += 30
+        elif close_price < ema20:
+            short_score += 10
+
+        if 50 <= rsi14 <= 70 and rsi14 >= prev_rsi:
+            long_score += 18
+        elif rsi14 > 70:
+            long_score += 8
+        if 30 <= rsi14 <= 50 and rsi14 <= prev_rsi:
+            short_score += 18
+        elif rsi14 < 30:
+            short_score += 8
 
         if rel_vol >= 1.8:
-            score += 20
+            long_score += 20
+            short_score += 20
         elif rel_vol >= 1.35:
-            score += 12
+            long_score += 12
+            short_score += 12
 
+        breakout_level = recent_resistance * 0.997
         breakdown_level = recent_support * 1.003
+        if close_price >= breakout_level:
+            long_score += 18
         if close_price <= breakdown_level:
-            score += 18
+            short_score += 18
 
+        if change_pct >= 0.6:
+            long_score += 10
+        elif change_pct >= 0.3:
+            long_score += 5
         if change_pct <= -0.6:
-            score += 10
+            short_score += 10
         elif change_pct <= -0.3:
-            score += 5
+            short_score += 5
 
-        risk = max(recent_resistance - close_price, close_price * 0.004, 0.25)
-        projected_target = recent_support - (recent_range * 0.35)
-        reward = max(close_price - projected_target, 0.0)
-        reward_to_risk = reward / risk if risk > 0 else 0.0
+        long_risk = max(close_price - recent_support, close_price * 0.004, 0.25)
+        short_risk = max(recent_resistance - close_price, close_price * 0.004, 0.25)
+        long_projected_target = recent_resistance + (recent_range * 0.35)
+        short_projected_target = recent_support - (recent_range * 0.35)
+        long_reward = max(long_projected_target - close_price, 0.0)
+        short_reward = max(close_price - short_projected_target, 0.0)
+        long_rr = long_reward / long_risk if long_risk > 0 else 0.0
+        short_rr = short_reward / short_risk if short_risk > 0 else 0.0
 
-        if reward_to_risk >= 2.2:
-            score += 20
-        elif reward_to_risk >= 1.7:
-            score += 10
+        if long_rr >= 2.2:
+            long_score += 20
+        elif long_rr >= 1.7:
+            long_score += 10
+        if short_rr >= 2.2:
+            short_score += 20
+        elif short_rr >= 1.7:
+            short_score += 10
 
-        signal = "SHORT SETUP" if score >= 60 and trend_down and rel_vol >= 1.1 and reward_to_risk >= 1.7 else "NO SIGNAL"
+        if long_score >= short_score and long_score >= 60 and trend_up and rel_vol >= 1.1 and long_rr >= 1.7:
+            signal = "LONG SETUP"
+            score = long_score
+            risk = long_risk
+            stop_loss = round(close_price - risk, 4)
+            tp1 = round(close_price + max(risk * 1.5, recent_range * 0.2), 4)
+            tp2 = round(close_price + max(risk * 2.3, recent_range * 0.35), 4)
+        elif short_score > long_score and short_score >= 60 and trend_down and rel_vol >= 1.1 and short_rr >= 1.7:
+            signal = "SHORT SETUP"
+            score = short_score
+            risk = short_risk
+            stop_loss = round(close_price + risk, 4)
+            tp1 = round(close_price - max(risk * 1.5, recent_range * 0.2), 4)
+            tp2 = round(close_price - max(risk * 2.3, recent_range * 0.35), 4)
+        else:
+            signal = "NO SIGNAL"
+            score = max(long_score, short_score)
+            risk = long_risk if long_score >= short_score else short_risk
+            stop_loss = round(close_price + short_risk, 4)
+            tp1 = round(close_price - max(short_risk * 1.5, recent_range * 0.2), 4)
+            tp2 = round(close_price - max(short_risk * 2.3, recent_range * 0.35), 4)
 
-        stop_loss = round(close_price + risk, 4)
-        tp1 = round(close_price - max(risk * 1.5, recent_range * 0.2), 4)
-        tp2 = round(close_price - max(risk * 2.3, recent_range * 0.35), 4)
         shares = int(100 / risk) if risk > 0 else 0
 
         rows.append(
@@ -310,7 +356,7 @@ def log_active_signals(signals: pd.DataFrame, paper: pd.DataFrame):
     if signals.empty:
         return paper, 0
 
-    active = signals[signals["signal"] == "SHORT SETUP"].copy()
+    active = signals[signals["signal"].astype(str).isin(["LONG SETUP", "SHORT SETUP"])].copy()
     if active.empty:
         return paper, 0
 
@@ -332,6 +378,7 @@ def log_active_signals(signals: pd.DataFrame, paper: pd.DataFrame):
             "take_profit_2": row["take_profit_2"],
             "shares": row["shares"],
             "score": row["score"],
+            "signal": row["signal"],
             "status": "OPEN",
             "pnl": "",
             "exit_price": "",
@@ -363,23 +410,41 @@ def update_open_trades(paper: pd.DataFrame):
         tp1 = float(trade["take_profit_1"])
         tp2 = float(trade["take_profit_2"])
         shares = float(trade["shares"])
+        trade_signal = str(trade.get("signal", "SHORT SETUP"))
 
-        if last_price >= stop_loss:
-            exit_price = stop_loss
-            reason = "STOP LOSS"
-            status = "CLOSED LOSS"
-        elif last_price <= tp2:
-            exit_price = tp2
-            reason = "TAKE PROFIT 2"
-            status = "CLOSED WIN"
-        elif last_price <= tp1:
-            exit_price = tp1
-            reason = "TAKE PROFIT 1"
-            status = "CLOSED WIN"
+        if trade_signal == "LONG SETUP":
+            if last_price <= stop_loss:
+                exit_price = stop_loss
+                reason = "STOP LOSS"
+                status = "CLOSED LOSS"
+            elif last_price >= tp2:
+                exit_price = tp2
+                reason = "TAKE PROFIT 2"
+                status = "CLOSED WIN"
+            elif last_price >= tp1:
+                exit_price = tp1
+                reason = "TAKE PROFIT 1"
+                status = "CLOSED WIN"
+            else:
+                continue
+            pnl = round((exit_price - entry) * shares, 2)
         else:
-            continue
+            if last_price >= stop_loss:
+                exit_price = stop_loss
+                reason = "STOP LOSS"
+                status = "CLOSED LOSS"
+            elif last_price <= tp2:
+                exit_price = tp2
+                reason = "TAKE PROFIT 2"
+                status = "CLOSED WIN"
+            elif last_price <= tp1:
+                exit_price = tp1
+                reason = "TAKE PROFIT 1"
+                status = "CLOSED WIN"
+            else:
+                continue
+            pnl = round((entry - exit_price) * shares, 2)
 
-        pnl = round((entry - exit_price) * shares, 2)
         paper.at[idx, "status"] = status
         paper.at[idx, "pnl"] = pnl
         paper.at[idx, "exit_price"] = exit_price
@@ -439,6 +504,7 @@ def add_paper_trade_from_setup(setup_row, paper_df: pd.DataFrame):
         "take_profit_2": setup_row["take_profit_2"],
         "shares": setup_row["shares"],
         "score": setup_row["score"],
+        "signal": setup_row["signal"],
         "status": "OPEN",
         "pnl": "",
         "exit_price": "",
@@ -821,7 +887,7 @@ st.sidebar.markdown(
         </div>
         <div class="sidebar-info-row">
             <div class="sidebar-info-label">Live Setups</div>
-            <div class="sidebar-info-value">{int((signals["signal"] == "SHORT SETUP").sum()) if not signals.empty else 0}</div>
+            <div class="sidebar-info-value">{int(signals["signal"].astype(str).isin(["LONG SETUP", "SHORT SETUP"]).sum()) if not signals.empty else 0}</div>
         </div>
         <div class="sidebar-info-row">
             <div class="sidebar-info-label">Phone Alerts</div>
@@ -849,7 +915,7 @@ m1, m2, m3, m4 = st.columns(4)
 m1.metric("Paper Win Rate %", win_rate)
 m2.metric("Paper P&L", f"${total_pnl}")
 m3.metric("Open Paper Trades", int(len(open_trades)))
-m4.metric("Live Setups", int((signals["signal"] == "SHORT SETUP").sum()) if not signals.empty else 0)
+m4.metric("Live Setups", int(signals["signal"].astype(str).isin(["LONG SETUP", "SHORT SETUP"]).sum()) if not signals.empty else 0)
 
 
 if page == "Command Center":
@@ -897,7 +963,7 @@ if page == "Command Center":
     cc1, cc2, cc3, cc4 = st.columns(4)
     cc1.metric("Trading Mode", trading_mode)
     cc2.metric("Open Trades", int(len(open_trades)))
-    cc3.metric("Live Setups", int((signals["signal"] == "SHORT SETUP").sum()) if not signals.empty else 0)
+    cc3.metric("Live Setups", int(signals["signal"].astype(str).isin(["LONG SETUP", "SHORT SETUP"]).sum()) if not signals.empty else 0)
     cc4.metric("Paper P&L", f"${round(float(paper_pnl), 2)}")
 
     left_col, right_col = st.columns([1.15, 0.85])
