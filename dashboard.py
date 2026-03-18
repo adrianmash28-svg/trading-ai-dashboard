@@ -33,6 +33,7 @@ TWILIO_ACCOUNT_SID = get_secret("TWILIO_ACCOUNT_SID", "")
 TWILIO_AUTH_TOKEN = get_secret("TWILIO_AUTH_TOKEN", "")
 TWILIO_FROM_NUMBER = get_secret("TWILIO_FROM_NUMBER", "")
 ALERT_TO_NUMBER = get_secret("ALERT_TO_NUMBER", "")
+TWILIO_VERIFY_SERVICE_SID = get_secret("TWILIO_VERIFY_SERVICE_SID", "")
 POLYGON_API_KEY = get_secret("ypKE7G5kgwYcGEPApyKMWjpgp4JGpCTT", "")
 
 PAPER_TRADES_FILE = "paper_trades.csv"
@@ -53,16 +54,15 @@ client = get_openai_client()
 
 
 def send_sms_alert(message: str):
-    if not all([TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER, ALERT_TO_NUMBER]):
-        return False, "Missing Twilio credentials"
+    if not all([TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, ALERT_TO_NUMBER, TWILIO_VERIFY_SERVICE_SID]):
+        return False, "Missing Twilio Verify credentials"
     try:
         response = requests.post(
-            f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_ACCOUNT_SID}/Messages.json",
+            f"https://verify.twilio.com/v2/Services/{TWILIO_VERIFY_SERVICE_SID}/Verifications",
             auth=(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN),
             data={
-                "From": TWILIO_FROM_NUMBER,
                 "To": ALERT_TO_NUMBER,
-                "Body": message,
+                "Channel": "sms",
             },
             timeout=10,
         )
