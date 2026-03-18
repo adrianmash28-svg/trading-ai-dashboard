@@ -54,9 +54,9 @@ client = get_openai_client()
 
 def send_sms_alert(message: str):
     if not all([TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER, ALERT_TO_NUMBER]):
-        return
+        return False
     try:
-        requests.post(
+        response = requests.post(
             f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_ACCOUNT_SID}/Messages.json",
             auth=(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN),
             data={
@@ -66,8 +66,9 @@ def send_sms_alert(message: str):
             },
             timeout=10,
         )
+        return response.ok
     except Exception:
-        pass
+        return False
 
 def get_polygon_last_trade(symbol: str):
     if not POLYGON_API_KEY:
@@ -787,6 +788,11 @@ st.sidebar.markdown(
     """,
     unsafe_allow_html=True,
 )
+if st.sidebar.button("Send Test SMS", use_container_width=True):
+    if send_sms_alert("✅ MashGPT test SMS is working."):
+        st.sidebar.success("Test SMS sent")
+    else:
+        st.sidebar.error("Test SMS could not be sent")
 
 
 st.title("Mash Trading Dashboard")
