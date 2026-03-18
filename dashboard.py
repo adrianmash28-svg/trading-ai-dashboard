@@ -1920,7 +1920,7 @@ total_pnl = round(float(performance["pnl"].sum()), 2)
 
 page = st.sidebar.radio(
     "Workspace",
-    ["Command Center", "Performance", "Market", "About"],
+    ["Command Center", "Performance", "Market", "MashGPT", "About"],
 )
 
 st.sidebar.markdown("---")
@@ -3003,6 +3003,10 @@ elif page == "Market":
       }});
     </script>
     """
+    st.markdown("### Live Chart")
+    components.html(tradingview_html, height=740)
+    st.caption("Chart display by TradingView. Live stats use Polygon when available.")
+
     st.markdown("### Market Snapshot")
 
     if polygon_trade and polygon_prev:
@@ -3046,7 +3050,3 @@ elif page == "Market":
         st.caption("Fallback data from yfinance")
     else:
         st.warning(f"No data found for {selected_symbol}")
-
-    with st.expander("Open Chart", expanded=False):
-        components.html(tradingview_html, height=740)
-        st.caption("Chart display by TradingView. Live stats use Polygon when available.")
