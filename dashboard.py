@@ -388,6 +388,20 @@ def add_paper_trade_from_setup(setup_row, paper_df: pd.DataFrame):
     return updated_paper, True
 
 
+def style_dashboard_chart(ax, title: str, xlabel: str, ylabel: str):
+    ax.set_facecolor("#111a2c")
+    ax.set_title(title, fontsize=15, fontweight="bold", color="#f8fafc", loc="left", pad=14)
+    ax.set_xlabel(xlabel, fontsize=11, color="#cbd5e1", labelpad=10)
+    ax.set_ylabel(ylabel, fontsize=11, color="#cbd5e1", labelpad=10)
+    ax.tick_params(colors="#cbd5e1", labelsize=10)
+    ax.grid(True, axis="y", color="#334155", alpha=0.4, linestyle="--", linewidth=0.8)
+    ax.grid(False, axis="x")
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.spines["left"].set_color("#475569")
+    ax.spines["bottom"].set_color("#475569")
+
+
 def ask_mashgpt(prompt: str, signals_df: pd.DataFrame, open_trades_df: pd.DataFrame, closed_trades_df: pd.DataFrame):
     if not client:
         return "OpenAI key is not connected."
@@ -675,28 +689,32 @@ if page == "Dashboard":
 
     with c1:
         st.subheader("Equity Curve")
-        fig, ax = plt.subplots(figsize=(10, 4.5))
-        ax.plot(performance["trade_num"], performance["equity"], linewidth=2.7)
-        ax.fill_between(performance["trade_num"], performance["equity"], performance["equity"].min(), alpha=0.08)
-        ax.set_title("Strategy Equity Curve", fontsize=15, pad=12)
-        ax.set_xlabel("Trade Number")
-        ax.set_ylabel("Account Value")
-        ax.grid(True, alpha=0.22, linestyle="--")
-        for spine in ["top", "right"]:
-            ax.spines[spine].set_visible(False)
+        fig, ax = plt.subplots(figsize=(10.5, 4.8), facecolor="#0f172a")
+        ax.plot(performance["trade_num"], performance["equity"], linewidth=2.8, color="#38bdf8")
+        ax.fill_between(
+            performance["trade_num"],
+            performance["equity"],
+            performance["equity"].min(),
+            color="#38bdf8",
+            alpha=0.12,
+        )
+        style_dashboard_chart(ax, "Paper Equity Curve", "Trade Number", "Account Value")
+        fig.tight_layout(pad=1.2)
         st.pyplot(fig)
 
     with c2:
         st.subheader("Drawdown")
-        fig2, ax2 = plt.subplots(figsize=(10, 4.5))
-        ax2.plot(performance["trade_num"], performance["drawdown"], linewidth=2.7)
-        ax2.fill_between(performance["trade_num"], performance["drawdown"], 0, alpha=0.12)
-        ax2.set_title("Strategy Drawdown", fontsize=15, pad=12)
-        ax2.set_xlabel("Trade Number")
-        ax2.set_ylabel("Drawdown ($)")
-        ax2.grid(True, alpha=0.22, linestyle="--")
-        for spine in ["top", "right"]:
-            ax2.spines[spine].set_visible(False)
+        fig2, ax2 = plt.subplots(figsize=(10.5, 4.8), facecolor="#0f172a")
+        ax2.plot(performance["trade_num"], performance["drawdown"], linewidth=2.8, color="#f97316")
+        ax2.fill_between(
+            performance["trade_num"],
+            performance["drawdown"],
+            0,
+            color="#f97316",
+            alpha=0.14,
+        )
+        style_dashboard_chart(ax2, "Drawdown Profile", "Trade Number", "Drawdown ($)")
+        fig2.tight_layout(pad=1.2)
         st.pyplot(fig2)
 
     st.subheader("System Activity")
@@ -758,8 +776,14 @@ elif page == "Setups":
         )
 
         st.markdown("### Score Overview")
-        score_chart = sorted_signals[["symbol", "score"]].copy().set_index("symbol")
-        st.bar_chart(score_chart, height=220)
+        fig3, ax3 = plt.subplots(figsize=(10.5, 3.6), facecolor="#0f172a")
+        bar_colors = ["#22c55e" if score >= 70 else "#f59e0b" if score >= 50 else "#64748b" for score in sorted_signals["score"]]
+        ax3.bar(sorted_signals["symbol"], sorted_signals["score"], color=bar_colors, width=0.6)
+        style_dashboard_chart(ax3, "Setup Score Overview", "Symbol", "Score")
+        ax3.set_ylim(0, max(100, float(sorted_signals["score"].max()) + 10))
+        plt.setp(ax3.get_xticklabels(), rotation=0, ha="center")
+        fig3.tight_layout(pad=1.1)
+        st.pyplot(fig3)
 
         st.markdown("### Ranked Setups")
         for _, setup in sorted_signals.iterrows():
