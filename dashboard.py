@@ -2146,7 +2146,7 @@ total_pnl = round(float(performance["pnl"].sum()), 2)
 
 page = st.sidebar.radio(
     "Workspace",
-    ["Home", "Money View", "Performance", "Trade Insights", "Market", "MashGPT"],
+    ["Home", "Money View", "Performance", "Strategy Lab", "Trade Insights", "Market", "MashGPT"],
 )
 
 st.sidebar.markdown("---")
@@ -2622,7 +2622,111 @@ elif page == "Trade Insights":
     render_trade_insights_section(trade_log)
 
 elif page == "Strategy Lab":
-    st.stop()
+    render_page_header(
+        "Strategy Lab",
+        "One place to understand the live algorithm, backtest behavior, strategy settings, and recent research progress.",
+        "Research",
+    )
+
+    champion_params = strategy_registry["champion"]["parameters"]
+    algo_state = algo_update_info.get("state", {})
+    algo_changed = bool(algo_update_info.get("changed", False))
+    live_status = "UPDATED" if algo_changed else "STABLE"
+
+    st.markdown("### Live Algorithm Status")
+    live1, live2, live3, live4, live5 = st.columns(5)
+    live1.metric("Current P&L", f"${float(paper_pnl):,.2f}")
+    live2.metric("Current Win Rate", f"{win_rate:.2f}%")
+    live3.metric("Trades", int(len(closed_trades)))
+    live4.metric("Status", live_status)
+    live5.metric("Changed Recently", "Yes" if algo_changed else "No")
+    if algo_state.get("last_message"):
+        st.caption(f"Last algo update: {algo_state.get('last_sent_at', '') or 'Not yet sent'}")
+        st.info(algo_state["last_message"])
+
+    st.markdown("### Backtest Results")
+    st.caption(
+        f"Backtest universe: {', '.join(BACKTEST_SYMBOLS)} | Lookback: ~3 years of daily candles per symbol"
+    )
+    with st.spinner("Running strategy lab backtest..."):
+        lab_backtest_trades = run_strategy_backtest(
+            tuple(BACKTEST_SYMBOLS),
+            period="3y",
+            interval="1d",
+            strategy_params_json=json.dumps(champion_params, sort_keys=True),
+        )
+    lab_backtest_summary = summarize_backtest_results(lab_backtest_trades)
+    lab_backtest_curve = create_paper_performance_curve(lab_backtest_trades)
+    strategy_registry["champion"]["results_summary"] = lab_backtest_summary
+    save_strategy_registry(strategy_registry)
+
+    bt1, bt2, bt3, bt4 = st.columns(4)
+    bt1.metric("Backtest P&L", f"${lab_backtest_summary.get('total_pnl', 0.0):,.2f}")
+    bt2.metric("Win Rate", f"{lab_backtest_summary.get('win_rate', 0.0):.2f}%")
+    bt3.metric("Max Drawdown", f"${lab_backtest_summary.get('max_drawdown', 0.0):,.2f}")
+    bt4.metric("Trade Count", int(lab_backtest_summary.get("num_trades", 0)))
+
+    fig_lab, ax_lab = plt.subplots(figsize=(11.0, 4.8), facecolor="#0f172a")
+    ax_lab.plot(lab_backtest_curve["trade_num"], lab_backtest_curve["equity"], linewidth=2.8, color="#38bdf8")
+    ax_lab.fill_between(
+        lab_backtest_curve["trade_num"],
+        lab_backtest_curve["equity"],
+        lab_backtest_curve["equity"].min(),
+        color="#38bdf8",
+        alpha=0.12,
+    )
+    style_dashboard_chart(ax_lab, "Backtest Equity Curve", "Trade Number", "Account Value")
+    fig_lab.tight_layout(pad=1.2)
+    st.pyplot(fig_lab)
+
+    st.markdown("### Current Strategy Settings")
+    settings_rows = pd.DataFrame(
+        [
+            {"setting": "Score Threshold", "value": champion_params.get("score_threshold", "")},
+            {"setting": "RSI Long Minimum", "value": champion_params.get("rsi_long_min", "")},
+            {"setting": "RSI Short Maximum", "value": champion_params.get("rsi_short_max", "")},
+            {"setting": "Relative Volume Minimum", "value": champion_params.get("rel_vol_min", "")},
+            {"setting": "Trend Filter", "value": f"EMA {champion_params.get('ema_long_len', 50)} with distance confirmation"},
+            {"setting": "EMA Short / Long", "value": f"{champion_params.get('ema_short_len', '')} / {champion_params.get('ema_long_len', '')}"},
+            {"setting": "Risk / Reward Threshold", "value": ">= 2.0"},
+            {"setting": "Stop Model", "value": "Recent swing structure"},
+        ]
+    )
+    st.dataframe(settings_rows, width="stretch", height=280)
+
+    challenger = strategy_registry.get("challenger")
+    if challenger:
+        st.markdown("### Champion vs Challenger")
+        champion_summary = strategy_registry["champion"].get("results_summary", {})
+        challenger_summary = challenger.get("results_summary", {})
+        cmp1, cmp2 = st.columns(2)
+        with cmp1:
+            st.markdown(f"**Champion:** `{strategy_to_label(strategy_registry['champion'])}`")
+            st.caption(strategy_registry["champion"].get("promotion_status", "Live champion"))
+            st.metric("Champion P&L", f"${champion_summary.get('total_pnl', 0.0):,.2f}")
+            st.metric("Champion Win Rate", f"{champion_summary.get('win_rate', 0.0):.2f}%")
+        with cmp2:
+            st.markdown(f"**Challenger:** `{strategy_to_label(challenger)}`")
+            st.caption(challenger.get("promotion_status", "Under review"))
+            st.metric("Challenger P&L", f"${challenger_summary.get('total_pnl', 0.0):,.2f}")
+            st.metric("Challenger Win Rate", f"{challenger_summary.get('win_rate', 0.0):.2f}%")
+
+        eligible, checks = compare_strategy_results(champion_summary, challenger_summary)
+        checks_df = pd.DataFrame(
+            [
+                {
+                    "check": check.get("check", ""),
+                    "passed": "Yes" if check.get("passed") else "No",
+                    "detail": check.get("detail", ""),
+                }
+                for check in checks
+            ]
+        )
+        st.dataframe(checks_df, width="stretch", height=210)
+        st.caption("Promotion ready" if eligible else "Challenger has not passed promotion gates yet.")
+
+    st.markdown("### Latest Experiments")
+    render_strategy_lab_section(strategy_registry)
 
 elif page == "About":
     render_page_header(
