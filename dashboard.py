@@ -604,8 +604,19 @@ st.markdown(
     """
     <style>
     .stApp {
-        background: linear-gradient(180deg, #0a0f1c 0%, #0d1320 100%);
+        background:
+            radial-gradient(circle at top left, rgba(56, 189, 248, 0.08), transparent 24%),
+            radial-gradient(circle at top right, rgba(249, 115, 22, 0.08), transparent 22%),
+            linear-gradient(180deg, #0a0f1c 0%, #0d1320 100%);
         color: #e8eefc;
+    }
+    h1, h2, h3 {
+        color: #f8fafc;
+        letter-spacing: -0.02em;
+    }
+    h2, h3 {
+        margin-top: 0.35rem;
+        margin-bottom: 0.7rem;
     }
     [data-testid="stSidebar"] {
         background: linear-gradient(180deg, #0b1220 0%, #0f172a 100%);
@@ -704,16 +715,94 @@ st.markdown(
         text-align: right;
     }
     div[data-testid="stMetric"] {
-        background: #111a2c;
-        border: 1px solid #223150;
-        border-radius: 18px;
-        padding: 14px;
-        box-shadow: 0 3px 10px rgba(0,0,0,0.18);
+        background: linear-gradient(180deg, rgba(17, 26, 44, 0.96) 0%, rgba(13, 19, 32, 0.98) 100%);
+        border: 1px solid rgba(51, 65, 85, 0.82);
+        border-radius: 20px;
+        padding: 16px;
+        box-shadow: 0 10px 28px rgba(0,0,0,0.18);
+    }
+    div[data-testid="stMetricLabel"] {
+        color: #94a3b8;
+        font-weight: 600;
+        letter-spacing: 0.03em;
+    }
+    div[data-testid="stMetricValue"] {
+        color: #f8fafc;
     }
     div[data-testid="stDataFrame"] {
-        border: 1px solid #223150;
-        border-radius: 16px;
+        border: 1px solid rgba(51, 65, 85, 0.75);
+        border-radius: 18px;
         overflow: hidden;
+        background: rgba(15, 23, 42, 0.72);
+        box-shadow: 0 12px 26px rgba(0, 0, 0, 0.18);
+    }
+    [data-testid="stAlert"] {
+        border-radius: 16px;
+        border: 1px solid rgba(51, 65, 85, 0.72);
+        background: rgba(15, 23, 42, 0.78);
+    }
+    [data-testid="stExpander"] {
+        border: 1px solid rgba(51, 65, 85, 0.74);
+        border-radius: 16px;
+        background: rgba(15, 23, 42, 0.55);
+        overflow: hidden;
+    }
+    [data-testid="stChatMessage"] {
+        background: rgba(15, 23, 42, 0.64);
+        border: 1px solid rgba(51, 65, 85, 0.74);
+        border-radius: 18px;
+        box-shadow: 0 12px 24px rgba(0, 0, 0, 0.14);
+    }
+    .stTextInput input, .stChatInput input, .stTextArea textarea {
+        background: rgba(15, 23, 42, 0.88);
+        color: #f8fafc;
+        border: 1px solid rgba(51, 65, 85, 0.88);
+        border-radius: 14px;
+    }
+    .stButton > button {
+        border-radius: 14px;
+        border: 1px solid rgba(56, 189, 248, 0.32);
+        background: linear-gradient(180deg, rgba(30, 41, 59, 0.95) 0%, rgba(15, 23, 42, 1) 100%);
+        color: #f8fafc;
+        font-weight: 700;
+        letter-spacing: 0.02em;
+        min-height: 2.6rem;
+        box-shadow: 0 10px 20px rgba(0, 0, 0, 0.14);
+    }
+    .stButton > button:hover {
+        border-color: rgba(56, 189, 248, 0.55);
+        color: #ffffff;
+    }
+    .app-hero {
+        background:
+            radial-gradient(circle at top right, rgba(56, 189, 248, 0.12), transparent 30%),
+            linear-gradient(135deg, rgba(15, 23, 42, 0.96) 0%, rgba(17, 26, 44, 0.98) 100%);
+        border: 1px solid rgba(51, 65, 85, 0.76);
+        border-radius: 24px;
+        padding: 1.25rem 1.35rem;
+        margin-bottom: 1rem;
+        box-shadow: 0 18px 36px rgba(0, 0, 0, 0.18);
+    }
+    .app-kicker {
+        color: #38bdf8;
+        font-size: 0.76rem;
+        font-weight: 800;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        margin-bottom: 0.45rem;
+    }
+    .app-title {
+        color: #f8fafc;
+        font-size: 2rem;
+        font-weight: 800;
+        line-height: 1.05;
+        margin-bottom: 0.35rem;
+        letter-spacing: -0.03em;
+    }
+    .app-subtitle {
+        color: #94a3b8;
+        font-size: 0.98rem;
+        line-height: 1.55;
     }
     .top-trade-banner {
         background: linear-gradient(135deg, rgba(30, 41, 59, 0.95) 0%, rgba(15, 23, 42, 0.98) 100%);
@@ -817,8 +906,9 @@ st.markdown(
         border: 1px solid rgba(148, 163, 184, 0.34);
     }
     .block-container {
-        padding-top: 1rem;
-        padding-bottom: 2rem;
+        padding-top: 0.85rem;
+        padding-bottom: 2.25rem;
+        max-width: 1480px;
     }
     </style>
     """,
@@ -908,8 +998,16 @@ if st.sidebar.button("Send Test SMS", use_container_width=True):
     st.sidebar.caption(f"Gateway address: {VERIZON_SMS_GATEWAY}")
 
 
-st.title("Mash Trading Dashboard")
-st.caption(f"Last refreshed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+st.markdown(
+    f"""
+    <div class="app-hero">
+        <div class="app-kicker">Mash Trading Platform</div>
+        <div class="app-title">Realtime signals, execution, and market intelligence in one terminal.</div>
+        <div class="app-subtitle">Command your watchlist, monitor paper performance, and act on long or short setups with a cleaner product-grade workspace. Last refreshed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
 m1, m2, m3, m4 = st.columns(4)
 m1.metric("Paper Win Rate %", win_rate)
