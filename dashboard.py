@@ -40,6 +40,7 @@ PAPER_TRADES_FILE = "paper_trades.csv"
 DEFAULT_SYMBOLS = ["META", "NVDA", "AAPL", "MSFT"]
 BACKTEST_SYMBOLS = ["SPY", "QQQ", "NVDA", "TSLA", "AAPL", "MSFT"]
 STARTING_EQUITY = 10000.0
+RISK_PER_TRADE = 0.01
 
 
 def get_openai_client():
@@ -205,7 +206,26 @@ def fetch_history(symbol: str, period: str = "6mo", interval: str = "1d") -> pd.
     return df
 
 
-def build_signal_snapshot(df: pd.DataFrame, symbol: str):
+def get_market_bias(df: pd.DataFrame) -> str:
+    if df.empty or len(df) < 60:
+        return "neutral"
+
+    market_df = df.copy()
+    market_df["ema50"] = market_df["Close"].ewm(span=50, adjust=False).mean()
+    last = market_df.iloc[-1]
+    prev = market_df.iloc[-2]
+    last_close = float(last["Close"])
+    ema50 = float(last["ema50"]) if pd.notna(last["ema50"]) else last_close
+    prev_ema50 = float(prev["ema50"]) if pd.notna(prev["ema50"]) else ema50
+
+    if last_close > ema50 and ema50 >= prev_ema50:
+        return "bullish"
+    if last_close < ema50 and ema50 <= prev_ema50:
+        return "bearish"
+    return "neutral"
+
+
+def build_signal_snapshot(df: pd.DataFrame, symbol: str, market_bias: str = "neutral", account_equity: float = STARTING_EQUITY):
     if df.empty or len(df) < 60:
         return None
 
@@ -242,30 +262,30 @@ def build_signal_snapshot(df: pd.DataFrame, symbol: str):
     long_score = 0
     short_score = 0
 
-    trend_up = ema20 > ema50 and close_price > ema20
-    trend_down = ema20 < ema50 and close_price < ema20
+    trend_up = ema20 > ema50 and close_price > ema50
+    trend_down = ema20 < ema50 and close_price < ema50
     if trend_up:
         long_score += 30
-    elif close_price > ema20:
+    elif close_price > ema50:
         long_score += 10
     if trend_down:
         short_score += 30
-    elif close_price < ema20:
+    elif close_price < ema50:
         short_score += 10
 
-    if 50 <= rsi14 <= 70 and rsi14 >= prev_rsi:
+    if 55 <= rsi14 <= 72 and rsi14 >= prev_rsi:
         long_score += 18
-    elif rsi14 > 70:
-        long_score += 8
-    if 30 <= rsi14 <= 50 and rsi14 <= prev_rsi:
+    elif rsi14 > 72:
+        long_score += 4
+    if 28 <= rsi14 <= 45 and rsi14 <= prev_rsi:
         short_score += 18
-    elif rsi14 < 30:
-        short_score += 8
+    elif rsi14 < 28:
+        short_score += 4
 
     if rel_vol >= 1.8:
         long_score += 20
         short_score += 20
-    elif rel_vol >= 1.35:
+    elif rel_vol >= 1.5:
         long_score += 12
         short_score += 12
 
@@ -303,14 +323,17 @@ def build_signal_snapshot(df: pd.DataFrame, symbol: str):
     elif short_rr >= 1.7:
         short_score += 10
 
-    if long_score >= short_score and long_score >= 60 and trend_up and rel_vol >= 1.1 and long_rr >= 1.7:
+    allow_long = market_bias == "bullish"
+    allow_short = market_bias == "bearish"
+
+    if long_score >= short_score and long_score >= 60 and trend_up and rel_vol >= 1.5 and rsi14 > 55 and long_rr >= 1.7 and allow_long:
         signal = "LONG SETUP"
         score = long_score
         risk = long_risk
         stop_loss = round(close_price - risk, 4)
         tp1 = round(close_price + max(risk * 1.5, recent_range * 0.2), 4)
         tp2 = round(close_price + max(risk * 2.3, recent_range * 0.35), 4)
-    elif short_score > long_score and short_score >= 60 and trend_down and rel_vol >= 1.1 and short_rr >= 1.7:
+    elif short_score > long_score and short_score >= 60 and trend_down and rel_vol >= 1.5 and rsi14 < 45 and short_rr >= 1.7 and allow_short:
         signal = "SHORT SETUP"
         score = short_score
         risk = short_risk
@@ -325,7 +348,8 @@ def build_signal_snapshot(df: pd.DataFrame, symbol: str):
         tp1 = round(close_price - max(short_risk * 1.5, recent_range * 0.2), 4)
         tp2 = round(close_price - max(short_risk * 2.3, recent_range * 0.35), 4)
 
-    shares = int(100 / risk) if risk > 0 else 0
+    risk_budget = max(float(account_equity) * RISK_PER_TRADE, 0.0)
+    shares = int(risk_budget / risk) if risk > 0 else 0
     return {
         "symbol": symbol,
         "time": str(work_df.index[-1]),
@@ -344,10 +368,12 @@ def build_signal_snapshot(df: pd.DataFrame, symbol: str):
 
 def calc_live_signals(symbols):
     rows = []
+    market_history = fetch_history("SPY", period="5d", interval="15m")
+    market_bias = get_market_bias(market_history)
 
     for symbol in symbols:
         df = fetch_history(symbol, period="5d", interval="15m")
-        signal_snapshot = build_signal_snapshot(df, symbol)
+        signal_snapshot = build_signal_snapshot(df, symbol, market_bias=market_bias, account_equity=STARTING_EQUITY)
         if signal_snapshot:
             rows.append(signal_snapshot)
 
@@ -358,8 +384,10 @@ def calc_live_signals(symbols):
 
 
 @st.cache_data(ttl=900)
-def run_strategy_backtest(symbols, period: str = "1y", interval: str = "1d") -> pd.DataFrame:
+def run_strategy_backtest(symbols, period: str = "2y", interval: str = "1d") -> pd.DataFrame:
     results = []
+    current_equity = STARTING_EQUITY
+    market_history = fetch_history("SPY", period=period, interval=interval)
 
     for symbol in symbols:
         history = fetch_history(symbol, period=period, interval=interval)
@@ -373,45 +401,99 @@ def run_strategy_backtest(symbols, period: str = "1y", interval: str = "1d") -> 
             current_time = history.index[idx]
             high_price = float(current_bar["High"])
             low_price = float(current_bar["Low"])
-            close_price = float(current_bar["Close"])
 
             if open_trade is not None:
                 if open_trade["signal"] == "LONG SETUP":
-                    if low_price <= open_trade["stop_loss"]:
+                    realized_pnl = 0.0
+                    exit_price = None
+                    exit_reason = None
+                    status = None
+
+                    if not open_trade["tp1_hit"] and low_price <= open_trade["stop_loss"]:
                         exit_price = open_trade["stop_loss"]
                         exit_reason = "STOP LOSS"
                         status = "CLOSED LOSS"
-                    elif high_price >= open_trade["take_profit_2"]:
+                        realized_pnl += (exit_price - open_trade["entry"]) * open_trade["shares_remaining"]
+                        open_trade["shares_remaining"] = 0
+                    elif not open_trade["tp1_hit"] and high_price >= open_trade["take_profit_2"]:
+                        tp1_shares = open_trade["shares_remaining"] / 2
+                        tp2_shares = open_trade["shares_remaining"] - tp1_shares
+                        realized_pnl += (open_trade["take_profit_1"] - open_trade["entry"]) * tp1_shares
+                        realized_pnl += (open_trade["take_profit_2"] - open_trade["entry"]) * tp2_shares
                         exit_price = open_trade["take_profit_2"]
                         exit_reason = "TAKE PROFIT 2"
                         status = "CLOSED WIN"
-                    elif high_price >= open_trade["take_profit_1"]:
-                        exit_price = open_trade["take_profit_1"]
-                        exit_reason = "TAKE PROFIT 1"
-                        status = "CLOSED WIN"
+                        open_trade["shares_remaining"] = 0
+                        open_trade["tp1_hit"] = True
                     else:
-                        exit_price = None
+                        if not open_trade["tp1_hit"] and high_price >= open_trade["take_profit_1"]:
+                            tp1_shares = open_trade["shares_remaining"] / 2
+                            realized_pnl += (open_trade["take_profit_1"] - open_trade["entry"]) * tp1_shares
+                            open_trade["shares_remaining"] -= tp1_shares
+                            open_trade["tp1_hit"] = True
+                            open_trade["stop_loss"] = open_trade["entry"]
+                        if open_trade["tp1_hit"] and open_trade["shares_remaining"] > 0:
+                            if low_price <= open_trade["stop_loss"]:
+                                exit_price = open_trade["stop_loss"]
+                                exit_reason = "STOP LOSS"
+                                status = "CLOSED WIN" if realized_pnl > 0 else "CLOSED LOSS"
+                                realized_pnl += (exit_price - open_trade["entry"]) * open_trade["shares_remaining"]
+                                open_trade["shares_remaining"] = 0
+                            elif high_price >= open_trade["take_profit_2"]:
+                                exit_price = open_trade["take_profit_2"]
+                                exit_reason = "TAKE PROFIT 2"
+                                status = "CLOSED WIN"
+                                realized_pnl += (exit_price - open_trade["entry"]) * open_trade["shares_remaining"]
+                                open_trade["shares_remaining"] = 0
                     if exit_price is not None:
-                        pnl = round((exit_price - open_trade["entry"]) * open_trade["shares"], 2)
+                        pnl = round(realized_pnl, 2)
                 else:
-                    if high_price >= open_trade["stop_loss"]:
+                    realized_pnl = 0.0
+                    exit_price = None
+                    exit_reason = None
+                    status = None
+
+                    if not open_trade["tp1_hit"] and high_price >= open_trade["stop_loss"]:
                         exit_price = open_trade["stop_loss"]
                         exit_reason = "STOP LOSS"
                         status = "CLOSED LOSS"
-                    elif low_price <= open_trade["take_profit_2"]:
+                        realized_pnl += (open_trade["entry"] - exit_price) * open_trade["shares_remaining"]
+                        open_trade["shares_remaining"] = 0
+                    elif not open_trade["tp1_hit"] and low_price <= open_trade["take_profit_2"]:
+                        tp1_shares = open_trade["shares_remaining"] / 2
+                        tp2_shares = open_trade["shares_remaining"] - tp1_shares
+                        realized_pnl += (open_trade["entry"] - open_trade["take_profit_1"]) * tp1_shares
+                        realized_pnl += (open_trade["entry"] - open_trade["take_profit_2"]) * tp2_shares
                         exit_price = open_trade["take_profit_2"]
                         exit_reason = "TAKE PROFIT 2"
                         status = "CLOSED WIN"
-                    elif low_price <= open_trade["take_profit_1"]:
-                        exit_price = open_trade["take_profit_1"]
-                        exit_reason = "TAKE PROFIT 1"
-                        status = "CLOSED WIN"
+                        open_trade["shares_remaining"] = 0
+                        open_trade["tp1_hit"] = True
                     else:
-                        exit_price = None
+                        if not open_trade["tp1_hit"] and low_price <= open_trade["take_profit_1"]:
+                            tp1_shares = open_trade["shares_remaining"] / 2
+                            realized_pnl += (open_trade["entry"] - open_trade["take_profit_1"]) * tp1_shares
+                            open_trade["shares_remaining"] -= tp1_shares
+                            open_trade["tp1_hit"] = True
+                            open_trade["stop_loss"] = open_trade["entry"]
+                        if open_trade["tp1_hit"] and open_trade["shares_remaining"] > 0:
+                            if high_price >= open_trade["stop_loss"]:
+                                exit_price = open_trade["stop_loss"]
+                                exit_reason = "STOP LOSS"
+                                status = "CLOSED WIN" if realized_pnl > 0 else "CLOSED LOSS"
+                                realized_pnl += (open_trade["entry"] - exit_price) * open_trade["shares_remaining"]
+                                open_trade["shares_remaining"] = 0
+                            elif low_price <= open_trade["take_profit_2"]:
+                                exit_price = open_trade["take_profit_2"]
+                                exit_reason = "TAKE PROFIT 2"
+                                status = "CLOSED WIN"
+                                realized_pnl += (open_trade["entry"] - exit_price) * open_trade["shares_remaining"]
+                                open_trade["shares_remaining"] = 0
                     if exit_price is not None:
-                        pnl = round((open_trade["entry"] - exit_price) * open_trade["shares"], 2)
+                        pnl = round(realized_pnl, 2)
 
                 if exit_price is not None:
+                    current_equity += pnl
                     results.append(
                         {
                             "symbol": symbol,
@@ -436,7 +518,14 @@ def run_strategy_backtest(symbols, period: str = "1y", interval: str = "1d") -> 
             if open_trade is not None:
                 continue
 
-            signal_snapshot = build_signal_snapshot(history.iloc[: idx + 1], symbol)
+            market_slice = market_history.loc[:current_time]
+            market_bias = get_market_bias(market_slice)
+            signal_snapshot = build_signal_snapshot(
+                history.iloc[: idx + 1],
+                symbol,
+                market_bias=market_bias,
+                account_equity=current_equity,
+            )
             if not signal_snapshot or signal_snapshot["signal"] == "NO SIGNAL" or signal_snapshot["shares"] <= 0:
                 continue
 
@@ -448,6 +537,8 @@ def run_strategy_backtest(symbols, period: str = "1y", interval: str = "1d") -> 
                 "take_profit_1": float(signal_snapshot["take_profit_1"]),
                 "take_profit_2": float(signal_snapshot["take_profit_2"]),
                 "shares": int(signal_snapshot["shares"]),
+                "shares_remaining": float(signal_snapshot["shares"]),
+                "tp1_hit": False,
                 "score": int(signal_snapshot["score"]),
             }
 
@@ -455,9 +546,10 @@ def run_strategy_backtest(symbols, period: str = "1y", interval: str = "1d") -> 
             final_time = history.index[-1]
             final_close = float(history["Close"].iloc[-1])
             if open_trade["signal"] == "LONG SETUP":
-                pnl = round((final_close - open_trade["entry"]) * open_trade["shares"], 2)
+                pnl = round((final_close - open_trade["entry"]) * open_trade["shares_remaining"], 2)
             else:
-                pnl = round((open_trade["entry"] - final_close) * open_trade["shares"], 2)
+                pnl = round((open_trade["entry"] - final_close) * open_trade["shares_remaining"], 2)
+            current_equity += pnl
 
             results.append(
                 {
@@ -1450,10 +1542,10 @@ elif page == "Performance":
     )
 
     st.caption(
-        f"Backtest universe: {', '.join(BACKTEST_SYMBOLS)} | Lookback: ~1 year of daily candles per symbol"
+        f"Backtest universe: {', '.join(BACKTEST_SYMBOLS)} | Lookback: ~2 years of daily candles per symbol"
     )
     with st.spinner("Running historical backtest..."):
-        backtest_trades = run_strategy_backtest(tuple(BACKTEST_SYMBOLS), period="1y", interval="1d")
+        backtest_trades = run_strategy_backtest(tuple(BACKTEST_SYMBOLS), period="2y", interval="1d")
     backtest_summary = summarize_backtest_results(backtest_trades)
     backtest_curve = create_paper_performance_curve(backtest_trades)
 
