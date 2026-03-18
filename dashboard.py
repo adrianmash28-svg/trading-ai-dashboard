@@ -204,152 +204,329 @@ def fetch_history(symbol: str, period: str = "6mo", interval: str = "1d") -> pd.
     return df
 
 
+def build_signal_snapshot(df: pd.DataFrame, symbol: str):
+    if df.empty or len(df) < 60:
+        return None
+
+    work_df = df.copy()
+    work_df["ema20"] = work_df["Close"].ewm(span=20, adjust=False).mean()
+    work_df["ema50"] = work_df["Close"].ewm(span=50, adjust=False).mean()
+    work_df["vol_avg20"] = work_df["Volume"].rolling(20).mean()
+    work_df["rel_vol"] = work_df["Volume"] / work_df["vol_avg20"]
+    delta = work_df["Close"].diff()
+    gains = delta.clip(lower=0)
+    losses = -delta.clip(upper=0)
+    avg_gain = gains.rolling(14).mean()
+    avg_loss = losses.rolling(14).mean()
+    rs = avg_gain / avg_loss.replace(0, pd.NA)
+    work_df["rsi14"] = 100 - (100 / (1 + rs))
+
+    last = work_df.iloc[-1]
+    prev = work_df.iloc[-2]
+    recent_window = work_df.iloc[-21:-1].copy()
+    if recent_window.empty:
+        return None
+
+    close_price = float(last["Close"])
+    ema20 = float(last["ema20"]) if pd.notna(last["ema20"]) else close_price
+    ema50 = float(last["ema50"]) if pd.notna(last["ema50"]) else close_price
+    rel_vol = float(last["rel_vol"]) if pd.notna(last["rel_vol"]) else 0.0
+    rsi14 = float(last["rsi14"]) if pd.notna(last["rsi14"]) else 50.0
+    prev_rsi = float(prev["rsi14"]) if pd.notna(prev["rsi14"]) else rsi14
+    change_pct = ((float(last["Close"]) - float(prev["Close"])) / float(prev["Close"])) * 100 if float(prev["Close"]) != 0 else 0.0
+    recent_support = float(recent_window["Low"].min())
+    recent_resistance = float(recent_window["High"].max())
+    recent_range = max(recent_resistance - recent_support, close_price * 0.01)
+
+    long_score = 0
+    short_score = 0
+
+    trend_up = ema20 > ema50 and close_price > ema20
+    trend_down = ema20 < ema50 and close_price < ema20
+    if trend_up:
+        long_score += 30
+    elif close_price > ema20:
+        long_score += 10
+    if trend_down:
+        short_score += 30
+    elif close_price < ema20:
+        short_score += 10
+
+    if 50 <= rsi14 <= 70 and rsi14 >= prev_rsi:
+        long_score += 18
+    elif rsi14 > 70:
+        long_score += 8
+    if 30 <= rsi14 <= 50 and rsi14 <= prev_rsi:
+        short_score += 18
+    elif rsi14 < 30:
+        short_score += 8
+
+    if rel_vol >= 1.8:
+        long_score += 20
+        short_score += 20
+    elif rel_vol >= 1.35:
+        long_score += 12
+        short_score += 12
+
+    breakout_level = recent_resistance * 0.997
+    breakdown_level = recent_support * 1.003
+    if close_price >= breakout_level:
+        long_score += 18
+    if close_price <= breakdown_level:
+        short_score += 18
+
+    if change_pct >= 0.6:
+        long_score += 10
+    elif change_pct >= 0.3:
+        long_score += 5
+    if change_pct <= -0.6:
+        short_score += 10
+    elif change_pct <= -0.3:
+        short_score += 5
+
+    long_risk = max(close_price - recent_support, close_price * 0.004, 0.25)
+    short_risk = max(recent_resistance - close_price, close_price * 0.004, 0.25)
+    long_projected_target = recent_resistance + (recent_range * 0.35)
+    short_projected_target = recent_support - (recent_range * 0.35)
+    long_reward = max(long_projected_target - close_price, 0.0)
+    short_reward = max(close_price - short_projected_target, 0.0)
+    long_rr = long_reward / long_risk if long_risk > 0 else 0.0
+    short_rr = short_reward / short_risk if short_risk > 0 else 0.0
+
+    if long_rr >= 2.2:
+        long_score += 20
+    elif long_rr >= 1.7:
+        long_score += 10
+    if short_rr >= 2.2:
+        short_score += 20
+    elif short_rr >= 1.7:
+        short_score += 10
+
+    if long_score >= short_score and long_score >= 60 and trend_up and rel_vol >= 1.1 and long_rr >= 1.7:
+        signal = "LONG SETUP"
+        score = long_score
+        risk = long_risk
+        stop_loss = round(close_price - risk, 4)
+        tp1 = round(close_price + max(risk * 1.5, recent_range * 0.2), 4)
+        tp2 = round(close_price + max(risk * 2.3, recent_range * 0.35), 4)
+    elif short_score > long_score and short_score >= 60 and trend_down and rel_vol >= 1.1 and short_rr >= 1.7:
+        signal = "SHORT SETUP"
+        score = short_score
+        risk = short_risk
+        stop_loss = round(close_price + risk, 4)
+        tp1 = round(close_price - max(risk * 1.5, recent_range * 0.2), 4)
+        tp2 = round(close_price - max(risk * 2.3, recent_range * 0.35), 4)
+    else:
+        signal = "NO SIGNAL"
+        score = max(long_score, short_score)
+        risk = long_risk if long_score >= short_score else short_risk
+        stop_loss = round(close_price + short_risk, 4)
+        tp1 = round(close_price - max(short_risk * 1.5, recent_range * 0.2), 4)
+        tp2 = round(close_price - max(short_risk * 2.3, recent_range * 0.35), 4)
+
+    shares = int(100 / risk) if risk > 0 else 0
+    return {
+        "symbol": symbol,
+        "time": str(work_df.index[-1]),
+        "close": round(close_price, 2),
+        "score": score,
+        "entry": round(close_price, 4),
+        "stop_loss": stop_loss,
+        "take_profit_1": tp1,
+        "take_profit_2": tp2,
+        "shares": shares,
+        "signal": signal,
+        "rel_vol": round(rel_vol, 2),
+        "change_pct": round(change_pct, 2),
+    }
+
+
 def calc_live_signals(symbols):
     rows = []
 
     for symbol in symbols:
         df = fetch_history(symbol, period="5d", interval="15m")
-        if df.empty or len(df) < 60:
-            continue
-
-        df["ema20"] = df["Close"].ewm(span=20, adjust=False).mean()
-        df["ema50"] = df["Close"].ewm(span=50, adjust=False).mean()
-        df["vol_avg20"] = df["Volume"].rolling(20).mean()
-        df["rel_vol"] = df["Volume"] / df["vol_avg20"]
-        delta = df["Close"].diff()
-        gains = delta.clip(lower=0)
-        losses = -delta.clip(upper=0)
-        avg_gain = gains.rolling(14).mean()
-        avg_loss = losses.rolling(14).mean()
-        rs = avg_gain / avg_loss.replace(0, pd.NA)
-        df["rsi14"] = 100 - (100 / (1 + rs))
-
-        last = df.iloc[-1]
-        prev = df.iloc[-2]
-        recent_window = df.iloc[-21:-1].copy()
-        if recent_window.empty:
-            continue
-
-        close_price = float(last["Close"])
-        ema20 = float(last["ema20"]) if pd.notna(last["ema20"]) else close_price
-        ema50 = float(last["ema50"]) if pd.notna(last["ema50"]) else close_price
-        rel_vol = float(last["rel_vol"]) if pd.notna(last["rel_vol"]) else 0.0
-        rsi14 = float(last["rsi14"]) if pd.notna(last["rsi14"]) else 50.0
-        prev_rsi = float(prev["rsi14"]) if pd.notna(prev["rsi14"]) else rsi14
-        change_pct = ((float(last["Close"]) - float(prev["Close"])) / float(prev["Close"])) * 100 if float(prev["Close"]) != 0 else 0.0
-        recent_support = float(recent_window["Low"].min())
-        recent_resistance = float(recent_window["High"].max())
-        recent_range = max(recent_resistance - recent_support, close_price * 0.01)
-
-        long_score = 0
-        short_score = 0
-
-        trend_up = ema20 > ema50 and close_price > ema20
-        trend_down = ema20 < ema50 and close_price < ema20
-        if trend_up:
-            long_score += 30
-        elif close_price > ema20:
-            long_score += 10
-        if trend_down:
-            short_score += 30
-        elif close_price < ema20:
-            short_score += 10
-
-        if 50 <= rsi14 <= 70 and rsi14 >= prev_rsi:
-            long_score += 18
-        elif rsi14 > 70:
-            long_score += 8
-        if 30 <= rsi14 <= 50 and rsi14 <= prev_rsi:
-            short_score += 18
-        elif rsi14 < 30:
-            short_score += 8
-
-        if rel_vol >= 1.8:
-            long_score += 20
-            short_score += 20
-        elif rel_vol >= 1.35:
-            long_score += 12
-            short_score += 12
-
-        breakout_level = recent_resistance * 0.997
-        breakdown_level = recent_support * 1.003
-        if close_price >= breakout_level:
-            long_score += 18
-        if close_price <= breakdown_level:
-            short_score += 18
-
-        if change_pct >= 0.6:
-            long_score += 10
-        elif change_pct >= 0.3:
-            long_score += 5
-        if change_pct <= -0.6:
-            short_score += 10
-        elif change_pct <= -0.3:
-            short_score += 5
-
-        long_risk = max(close_price - recent_support, close_price * 0.004, 0.25)
-        short_risk = max(recent_resistance - close_price, close_price * 0.004, 0.25)
-        long_projected_target = recent_resistance + (recent_range * 0.35)
-        short_projected_target = recent_support - (recent_range * 0.35)
-        long_reward = max(long_projected_target - close_price, 0.0)
-        short_reward = max(close_price - short_projected_target, 0.0)
-        long_rr = long_reward / long_risk if long_risk > 0 else 0.0
-        short_rr = short_reward / short_risk if short_risk > 0 else 0.0
-
-        if long_rr >= 2.2:
-            long_score += 20
-        elif long_rr >= 1.7:
-            long_score += 10
-        if short_rr >= 2.2:
-            short_score += 20
-        elif short_rr >= 1.7:
-            short_score += 10
-
-        if long_score >= short_score and long_score >= 60 and trend_up and rel_vol >= 1.1 and long_rr >= 1.7:
-            signal = "LONG SETUP"
-            score = long_score
-            risk = long_risk
-            stop_loss = round(close_price - risk, 4)
-            tp1 = round(close_price + max(risk * 1.5, recent_range * 0.2), 4)
-            tp2 = round(close_price + max(risk * 2.3, recent_range * 0.35), 4)
-        elif short_score > long_score and short_score >= 60 and trend_down and rel_vol >= 1.1 and short_rr >= 1.7:
-            signal = "SHORT SETUP"
-            score = short_score
-            risk = short_risk
-            stop_loss = round(close_price + risk, 4)
-            tp1 = round(close_price - max(risk * 1.5, recent_range * 0.2), 4)
-            tp2 = round(close_price - max(risk * 2.3, recent_range * 0.35), 4)
-        else:
-            signal = "NO SIGNAL"
-            score = max(long_score, short_score)
-            risk = long_risk if long_score >= short_score else short_risk
-            stop_loss = round(close_price + short_risk, 4)
-            tp1 = round(close_price - max(short_risk * 1.5, recent_range * 0.2), 4)
-            tp2 = round(close_price - max(short_risk * 2.3, recent_range * 0.35), 4)
-
-        shares = int(100 / risk) if risk > 0 else 0
-
-        rows.append(
-            {
-                "symbol": symbol,
-                "time": str(df.index[-1]),
-                "close": round(close_price, 2),
-                "score": score,
-                "entry": round(close_price, 4),
-                "stop_loss": stop_loss,
-                "take_profit_1": tp1,
-                "take_profit_2": tp2,
-                "shares": shares,
-                "signal": signal,
-                "rel_vol": round(rel_vol, 2),
-                "change_pct": round(change_pct, 2),
-            }
-        )
+        signal_snapshot = build_signal_snapshot(df, symbol)
+        if signal_snapshot:
+            rows.append(signal_snapshot)
 
     if not rows:
         return pd.DataFrame()
 
     return pd.DataFrame(rows).sort_values("score", ascending=False).reset_index(drop=True)
+
+
+@st.cache_data(ttl=900)
+def run_strategy_backtest(symbols, period: str = "1y", interval: str = "1d") -> pd.DataFrame:
+    results = []
+
+    for symbol in symbols:
+        history = fetch_history(symbol, period=period, interval=interval)
+        if history.empty or len(history) < 80:
+            continue
+
+        open_trade = None
+
+        for idx in range(60, len(history)):
+            current_bar = history.iloc[idx]
+            current_time = history.index[idx]
+            high_price = float(current_bar["High"])
+            low_price = float(current_bar["Low"])
+            close_price = float(current_bar["Close"])
+
+            if open_trade is not None:
+                if open_trade["signal"] == "LONG SETUP":
+                    if low_price <= open_trade["stop_loss"]:
+                        exit_price = open_trade["stop_loss"]
+                        exit_reason = "STOP LOSS"
+                        status = "CLOSED LOSS"
+                    elif high_price >= open_trade["take_profit_2"]:
+                        exit_price = open_trade["take_profit_2"]
+                        exit_reason = "TAKE PROFIT 2"
+                        status = "CLOSED WIN"
+                    elif high_price >= open_trade["take_profit_1"]:
+                        exit_price = open_trade["take_profit_1"]
+                        exit_reason = "TAKE PROFIT 1"
+                        status = "CLOSED WIN"
+                    else:
+                        exit_price = None
+                    if exit_price is not None:
+                        pnl = round((exit_price - open_trade["entry"]) * open_trade["shares"], 2)
+                else:
+                    if high_price >= open_trade["stop_loss"]:
+                        exit_price = open_trade["stop_loss"]
+                        exit_reason = "STOP LOSS"
+                        status = "CLOSED LOSS"
+                    elif low_price <= open_trade["take_profit_2"]:
+                        exit_price = open_trade["take_profit_2"]
+                        exit_reason = "TAKE PROFIT 2"
+                        status = "CLOSED WIN"
+                    elif low_price <= open_trade["take_profit_1"]:
+                        exit_price = open_trade["take_profit_1"]
+                        exit_reason = "TAKE PROFIT 1"
+                        status = "CLOSED WIN"
+                    else:
+                        exit_price = None
+                    if exit_price is not None:
+                        pnl = round((open_trade["entry"] - exit_price) * open_trade["shares"], 2)
+
+                if exit_price is not None:
+                    results.append(
+                        {
+                            "symbol": symbol,
+                            "signal": open_trade["signal"],
+                            "time": current_time,
+                            "entry_time": open_trade["entry_time"],
+                            "close_time": current_time,
+                            "entry": open_trade["entry"],
+                            "stop_loss": open_trade["stop_loss"],
+                            "take_profit_1": open_trade["take_profit_1"],
+                            "take_profit_2": open_trade["take_profit_2"],
+                            "shares": open_trade["shares"],
+                            "status": status,
+                            "exit_price": exit_price,
+                            "exit_reason": exit_reason,
+                            "pnl": pnl,
+                            "score": open_trade["score"],
+                        }
+                    )
+                    open_trade = None
+
+            if open_trade is not None:
+                continue
+
+            signal_snapshot = build_signal_snapshot(history.iloc[: idx + 1], symbol)
+            if not signal_snapshot or signal_snapshot["signal"] == "NO SIGNAL" or signal_snapshot["shares"] <= 0:
+                continue
+
+            open_trade = {
+                "signal": signal_snapshot["signal"],
+                "entry_time": current_time,
+                "entry": float(signal_snapshot["entry"]),
+                "stop_loss": float(signal_snapshot["stop_loss"]),
+                "take_profit_1": float(signal_snapshot["take_profit_1"]),
+                "take_profit_2": float(signal_snapshot["take_profit_2"]),
+                "shares": int(signal_snapshot["shares"]),
+                "score": int(signal_snapshot["score"]),
+            }
+
+        if open_trade is not None:
+            final_time = history.index[-1]
+            final_close = float(history["Close"].iloc[-1])
+            if open_trade["signal"] == "LONG SETUP":
+                pnl = round((final_close - open_trade["entry"]) * open_trade["shares"], 2)
+            else:
+                pnl = round((open_trade["entry"] - final_close) * open_trade["shares"], 2)
+
+            results.append(
+                {
+                    "symbol": symbol,
+                    "signal": open_trade["signal"],
+                    "time": final_time,
+                    "entry_time": open_trade["entry_time"],
+                    "close_time": final_time,
+                    "entry": open_trade["entry"],
+                    "stop_loss": open_trade["stop_loss"],
+                    "take_profit_1": open_trade["take_profit_1"],
+                    "take_profit_2": open_trade["take_profit_2"],
+                    "shares": open_trade["shares"],
+                    "status": "CLOSED WIN" if pnl >= 0 else "CLOSED LOSS",
+                    "exit_price": round(final_close, 4),
+                    "exit_reason": "END OF TEST",
+                    "pnl": pnl,
+                    "score": open_trade["score"],
+                }
+            )
+
+    if not results:
+        return pd.DataFrame(
+            columns=[
+                "symbol",
+                "signal",
+                "time",
+                "entry_time",
+                "close_time",
+                "entry",
+                "stop_loss",
+                "take_profit_1",
+                "take_profit_2",
+                "shares",
+                "status",
+                "exit_price",
+                "exit_reason",
+                "pnl",
+                "score",
+            ]
+        )
+
+    return pd.DataFrame(results).sort_values(["close_time", "symbol"], na_position="last").reset_index(drop=True)
+
+
+def summarize_backtest_results(backtest_trades: pd.DataFrame):
+    if backtest_trades is None or backtest_trades.empty:
+        return {
+            "total_pnl": 0.0,
+            "win_rate": 0.0,
+            "average_win": 0.0,
+            "average_loss": 0.0,
+            "max_drawdown": 0.0,
+            "num_trades": 0,
+        }
+
+    trades = backtest_trades.copy()
+    trades["pnl"] = pd.to_numeric(trades["pnl"], errors="coerce").fillna(0.0)
+    wins = trades[trades["pnl"] > 0]
+    losses = trades[trades["pnl"] < 0]
+    backtest_curve = create_paper_performance_curve(trades)
+
+    return {
+        "total_pnl": round(float(trades["pnl"].sum()), 2),
+        "win_rate": round(float((trades["pnl"] > 0).mean() * 100), 2),
+        "average_win": round(float(wins["pnl"].mean()), 2) if not wins.empty else 0.0,
+        "average_loss": round(float(losses["pnl"].mean()), 2) if not losses.empty else 0.0,
+        "max_drawdown": round(float(backtest_curve["drawdown"].min()), 2) if not backtest_curve.empty else 0.0,
+        "num_trades": int(len(trades)),
+    }
 
 
 def log_active_signals(signals: pd.DataFrame, paper: pd.DataFrame):
@@ -997,7 +1174,7 @@ total_pnl = round(float(performance["pnl"].sum()), 2)
 
 page = st.sidebar.radio(
     "Workspace",
-    ["Command Center", "Trades", "Live Market", "MashGPT", "About"],
+    ["Command Center", "Trades", "Performance", "Live Market", "MashGPT", "About"],
 )
 
 st.sidebar.markdown("---")
@@ -1267,57 +1444,55 @@ elif page == "Dashboard":
 elif page == "Performance":
     render_page_header(
         "Performance",
-        "Review closed-trade analytics, equity growth, and win-loss behavior in a cleaner journal-style view.",
-        "Trade Journal",
+        "Validate the current strategy with historical simulations built from the same signal engine used in the live scanner.",
+        "Strategy Lab",
     )
 
-    if closed_trades.empty:
+    with st.spinner("Running historical backtest..."):
+        backtest_trades = run_strategy_backtest(tuple(symbols), period="1y", interval="1d")
+    backtest_summary = summarize_backtest_results(backtest_trades)
+    backtest_curve = create_paper_performance_curve(backtest_trades)
+
+    if backtest_trades.empty:
         st.markdown(
             """
             <div class="top-trade-banner" style="border-color: rgba(71, 85, 105, 0.7);">
-                <div class="top-trade-kicker" style="color: #cbd5e1;">No Closed Trades Yet</div>
-                <div class="app-subtitle">Closed trades will appear here once paper positions finish and the journal has performance data to analyze.</div>
+                <div class="top-trade-kicker" style="color: #cbd5e1;">No Backtest Trades Yet</div>
+                <div class="app-subtitle">The historical simulation did not generate enough completed setups for the selected watchlist and timeframe.</div>
             </div>
             """,
             unsafe_allow_html=True,
         )
     else:
-        performance_trades = closed_trades.copy()
-        performance_trades["pnl"] = pd.to_numeric(performance_trades["pnl"], errors="coerce").fillna(0.0)
-        wins = performance_trades[performance_trades["pnl"] > 0]
-        losses = performance_trades[performance_trades["pnl"] < 0]
-        total_closed_trades = int(len(performance_trades))
-        average_win = float(wins["pnl"].mean()) if not wins.empty else 0.0
-        average_loss = float(losses["pnl"].mean()) if not losses.empty else 0.0
-
-        p1, p2, p3, p4, p5 = st.columns(5)
-        p1.metric("Total P&L", f"${total_pnl:,.2f}")
-        p2.metric("Win Rate", f"{win_rate:.2f}%")
-        p3.metric("Total Trades", total_closed_trades)
-        p4.metric("Average Win", f"${average_win:,.2f}")
-        p5.metric("Average Loss", f"${average_loss:,.2f}")
+        p1, p2, p3, p4, p5, p6 = st.columns(6)
+        p1.metric("Total P&L", f"${backtest_summary['total_pnl']:,.2f}")
+        p2.metric("Win Rate", f"{backtest_summary['win_rate']:.2f}%")
+        p3.metric("Trades", backtest_summary["num_trades"])
+        p4.metric("Average Win", f"${backtest_summary['average_win']:,.2f}")
+        p5.metric("Average Loss", f"${backtest_summary['average_loss']:,.2f}")
+        p6.metric("Max Drawdown", f"${backtest_summary['max_drawdown']:,.2f}")
 
         chart_col1, chart_col2 = st.columns(2)
 
         with chart_col1:
             fig_perf, ax_perf = plt.subplots(figsize=(10.5, 4.8), facecolor="#0f172a")
-            ax_perf.plot(performance["trade_num"], performance["equity"], linewidth=2.8, color="#38bdf8")
+            ax_perf.plot(backtest_curve["trade_num"], backtest_curve["equity"], linewidth=2.8, color="#38bdf8")
             ax_perf.fill_between(
-                performance["trade_num"],
-                performance["equity"],
-                performance["equity"].min(),
+                backtest_curve["trade_num"],
+                backtest_curve["equity"],
+                backtest_curve["equity"].min(),
                 color="#38bdf8",
                 alpha=0.12,
             )
-            style_dashboard_chart(ax_perf, "Equity Curve", "Trade Number", "Account Value")
+            style_dashboard_chart(ax_perf, "Backtest Equity Curve", "Trade Number", "Account Value")
             fig_perf.tight_layout(pad=1.2)
             st.pyplot(fig_perf)
 
         with chart_col2:
             fig_pnl, ax_pnl = plt.subplots(figsize=(10.5, 4.8), facecolor="#0f172a")
-            pnl_colors = ["#22c55e" if pnl >= 0 else "#ef4444" for pnl in performance["pnl"]]
-            ax_pnl.bar(performance["trade_num"], performance["pnl"], color=pnl_colors, width=0.65)
-            style_dashboard_chart(ax_pnl, "P&L Per Trade", "Trade Number", "P&L ($)")
+            pnl_colors = ["#22c55e" if pnl >= 0 else "#ef4444" for pnl in backtest_trades["pnl"]]
+            ax_pnl.bar(backtest_curve["trade_num"], backtest_trades["pnl"], color=pnl_colors, width=0.65)
+            style_dashboard_chart(ax_pnl, "Backtest P&L Per Trade", "Trade Number", "P&L ($)")
             ax_pnl.axhline(0, color="#64748b", linewidth=1.0, alpha=0.8)
             fig_pnl.tight_layout(pad=1.2)
             st.pyplot(fig_pnl)
@@ -1325,20 +1500,20 @@ elif page == "Performance":
         fig_outcomes, ax_outcomes = plt.subplots(figsize=(10.5, 3.8), facecolor="#0f172a")
         outcome_counts = pd.Series(
             {
-                "Wins": int((performance_trades["pnl"] > 0).sum()),
-                "Losses": int((performance_trades["pnl"] < 0).sum()),
+                "Wins": int((backtest_trades["pnl"] > 0).sum()),
+                "Losses": int((backtest_trades["pnl"] < 0).sum()),
             }
         )
         ax_outcomes.bar(outcome_counts.index, outcome_counts.values, color=["#22c55e", "#ef4444"], width=0.55)
-        style_dashboard_chart(ax_outcomes, "Win vs Loss", "Outcome", "Trades")
+        style_dashboard_chart(ax_outcomes, "Backtest Win vs Loss", "Outcome", "Trades")
         fig_outcomes.tight_layout(pad=1.2)
         st.pyplot(fig_outcomes)
 
-        st.markdown("### Closed Trade Journal")
+        st.markdown("### Simulated Trade Log")
         journal_columns = [
             "symbol",
             "signal",
-            "time",
+            "entry_time",
             "close_time",
             "entry",
             "exit_price",
@@ -1346,10 +1521,11 @@ elif page == "Performance":
             "status",
             "exit_reason",
             "pnl",
+            "score",
         ]
-        available_journal_columns = [col for col in journal_columns if col in performance_trades.columns]
+        available_journal_columns = [col for col in journal_columns if col in backtest_trades.columns]
         st.dataframe(
-            performance_trades[available_journal_columns].copy(),
+            backtest_trades[available_journal_columns].copy(),
             width="stretch",
             height=340,
         )
