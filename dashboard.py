@@ -1236,9 +1236,91 @@ elif page == "Live Signals":
         "Market Feed",
     )
     if signals.empty:
-        st.info("No live signals right now.")
+        st.markdown(
+            """
+            <div class="top-trade-banner" style="border-color: rgba(71, 85, 105, 0.7);">
+                <div class="top-trade-kicker" style="color: #cbd5e1;">Scanner Standing By</div>
+                <div class="app-subtitle">No live signals are active right now. The scanner is still monitoring the watchlist for stronger long or short setups.</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
     else:
-        st.dataframe(signals, width="stretch", height=420)
+        live_signals = signals.sort_values("score", ascending=False).reset_index(drop=True)
+        top_signal = live_signals.iloc[0]
+        top_score = int(top_signal["score"])
+        top_verdict = get_setup_verdict(top_score)
+
+        st.markdown(
+            f"""
+            <div class="top-trade-banner">
+                <div class="top-trade-kicker">Top Signal</div>
+                <div class="top-trade-grid">
+                    <div class="top-trade-item">
+                        <div class="top-trade-label">Symbol</div>
+                        <div class="top-trade-value">{top_signal["symbol"]}</div>
+                    </div>
+                    <div class="top-trade-item">
+                        <div class="top-trade-label">Signal</div>
+                        <div class="top-trade-value">{top_signal["signal"]}</div>
+                    </div>
+                    <div class="top-trade-item">
+                        <div class="top-trade-label">Score</div>
+                        <div class="top-trade-value">{top_score}</div>
+                    </div>
+                    <div class="top-trade-item">
+                        <div class="top-trade-label">Entry</div>
+                        <div class="top-trade-value">{float(top_signal["entry"]):.4f}</div>
+                    </div>
+                    <div class="top-trade-item">
+                        <div class="top-trade-label">Stop</div>
+                        <div class="top-trade-value">{float(top_signal["stop_loss"]):.4f}</div>
+                    </div>
+                    <div class="top-trade-item">
+                        <div class="top-trade-label">Verdict</div>
+                        <div class="top-trade-value">{top_verdict}</div>
+                    </div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        st.markdown("### Signal Scanner")
+        for _, signal_row in live_signals.iterrows():
+            score = int(signal_row["score"])
+            signal_verdict = get_setup_verdict(score)
+            verdict_class = signal_verdict.lower()
+
+            st.markdown(
+                f"""
+                <div class="setup-card {verdict_class}">
+                    <div class="setup-card-header">
+                        <div>
+                            <div class="setup-symbol">{signal_row["symbol"]}</div>
+                            <div class="setup-signal">{signal_row["signal"]}</div>
+                        </div>
+                        <div class="setup-badge {verdict_class}">{signal_verdict}</div>
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+            signal_top_metrics = st.columns(5)
+            signal_top_metrics[0].metric("Score", score)
+            signal_top_metrics[1].metric("Entry", f'{float(signal_row["entry"]):.4f}')
+            signal_top_metrics[2].metric("Stop", f'{float(signal_row["stop_loss"]):.4f}')
+            signal_top_metrics[3].metric("TP1", f'{float(signal_row["take_profit_1"]):.4f}')
+            signal_top_metrics[4].metric("TP2", f'{float(signal_row["take_profit_2"]):.4f}')
+
+            signal_bottom_metrics = st.columns(4)
+            signal_bottom_metrics[0].metric("Shares", int(signal_row["shares"]))
+            signal_bottom_metrics[1].metric("Rel Vol", f'{float(signal_row["rel_vol"]):.2f}x')
+            signal_bottom_metrics[2].metric("Change %", f'{float(signal_row["change_pct"]):.2f}%')
+            signal_bottom_metrics[3].metric("Signal Type", str(signal_row["signal"]))
+
+            st.markdown("")
 
 elif page == "Setups":
     render_page_header(
