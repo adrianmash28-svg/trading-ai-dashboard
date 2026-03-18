@@ -29,7 +29,10 @@ def get_secret(name: str, default: str = "") -> str:
 
 
 OPENAI_API_KEY = get_secret("OPENAI_API_KEY", "")
-DISCORD_WEBHOOK_URL = get_secret("DISCORD_WEBHOOK_URL", "")
+TWILIO_ACCOUNT_SID = get_secret("TWILIO_ACCOUNT_SID", "")
+TWILIO_AUTH_TOKEN = get_secret("TWILIO_AUTH_TOKEN", "")
+TWILIO_FROM_NUMBER = get_secret("TWILIO_FROM_NUMBER", "")
+ALERT_TO_NUMBER = get_secret("ALERT_TO_NUMBER", "")
 POLYGON_API_KEY = get_secret("ypKE7G5kgwYcGEPApyKMWjpgp4JGpCTT", "")
 
 PAPER_TRADES_FILE = "paper_trades.csv"
@@ -49,11 +52,20 @@ def get_openai_client():
 client = get_openai_client()
 
 
-def send_discord_alert(message: str):
-    if not DISCORD_WEBHOOK_URL:
+def send_sms_alert(message: str):
+    if not all([TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER, ALERT_TO_NUMBER]):
         return
     try:
-        requests.post(DISCORD_WEBHOOK_URL, json={"content": message}, timeout=10)
+        requests.post(
+            f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_ACCOUNT_SID}/Messages.json",
+            auth=(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN),
+            data={
+                "From": TWILIO_FROM_NUMBER,
+                "To": ALERT_TO_NUMBER,
+                "Body": message,
+            },
+            timeout=10,
+        )
     except Exception:
         pass
 
@@ -283,6 +295,7 @@ def log_active_signals(signals: pd.DataFrame, paper: pd.DataFrame):
             "close_time": "",
         }
         paper = pd.concat([paper, pd.DataFrame([new_row])], ignore_index=True)
+        send_sms_alert(f"🚀 TRADE OPEN: {row['symbol']} @ {float(row['entry']):.2f}")
         added += 1
 
     return paper, added
@@ -328,6 +341,10 @@ def update_open_trades(paper: pd.DataFrame):
         paper.at[idx, "exit_price"] = exit_price
         paper.at[idx, "exit_reason"] = reason
         paper.at[idx, "close_time"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        if status == "CLOSED WIN":
+            send_sms_alert(f"✅ WIN: {symbol} TP hit (+${abs(pnl):.2f})")
+        else:
+            send_sms_alert(f"❌ LOSS: {symbol} SL hit (-${abs(pnl):.2f})")
         closed_now += 1
 
     return paper, closed_now
@@ -385,6 +402,7 @@ def add_paper_trade_from_setup(setup_row, paper_df: pd.DataFrame):
         "close_time": "",
     }
     updated_paper = pd.concat([paper_df, pd.DataFrame([new_row])], ignore_index=True)
+    send_sms_alert(f"🚀 TRADE OPEN: {symbol} @ {float(setup_row['entry']):.2f}")
     return updated_paper, True
 
 
@@ -762,8 +780,8 @@ st.sidebar.markdown(
             <div class="sidebar-info-value">{int((signals["signal"] == "SHORT SETUP").sum()) if not signals.empty else 0}</div>
         </div>
         <div class="sidebar-info-row">
-            <div class="sidebar-info-label">Discord Alerts</div>
-            <div class="sidebar-info-value">{'On' if DISCORD_WEBHOOK_URL else 'Off'}</div>
+            <div class="sidebar-info-label">SMS Alerts</div>
+            <div class="sidebar-info-value">{'On' if all([TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER, ALERT_TO_NUMBER]) else 'Off'}</div>
         </div>
     </div>
     """,
