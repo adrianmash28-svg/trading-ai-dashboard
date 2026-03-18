@@ -1,4 +1,5 @@
 import os
+import time
 from datetime import datetime
 
 import matplotlib.pyplot as plt
@@ -525,11 +526,15 @@ elif page == "MashGPT":
         with st.chat_message("user", avatar="🙂"):
             st.write(prompt)
 
-        reply = ask_mashgpt(prompt, signals, open_trades, closed_trades)
-        st.session_state.chat_history.append(("assistant", reply))
-
         with st.chat_message("assistant", avatar="🤖"):
+            start_time = time.time()
+            with st.spinner("MashGPT is analyzing the market..."):
+                reply = ask_mashgpt(prompt, signals, open_trades, closed_trades)
+            duration = time.time() - start_time
             st.write(reply)
+            st.caption(f"Done in {duration:.2f} seconds")
+
+        st.session_state.chat_history.append(("assistant", reply))
 
 elif page == "Live Market":
     st.markdown("## Live Market")
