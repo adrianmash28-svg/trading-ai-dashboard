@@ -997,7 +997,7 @@ total_pnl = round(float(performance["pnl"].sum()), 2)
 
 page = st.sidebar.radio(
     "Workspace",
-    ["Command Center", "Setups", "Performance", "Live Market", "MashGPT", "About"],
+    ["Command Center", "Trades", "Live Market", "MashGPT", "About"],
 )
 
 st.sidebar.markdown("---")
@@ -1378,6 +1378,199 @@ elif page == "About":
         The platform is intended for research, analysis, and simulated trading. It is built to help users evaluate setups, understand trade structure, and review performance in a more disciplined way, without presenting itself as a guarantee of outcomes or a substitute for independent judgment. In that sense, Mash Terminal is best understood as a decision-support product: a professional-feeling workspace for scanning markets, organizing information, and practicing execution with greater structure.
         """
     )
+
+elif page == "Trades":
+    render_page_header(
+        "Trades",
+        "One place to review setups, open positions, and closed-trade performance without jumping across redundant pages.",
+        "Execution Hub",
+    )
+
+    performance_trades = closed_trades.copy()
+    performance_trades["pnl"] = pd.to_numeric(performance_trades["pnl"], errors="coerce").fillna(0.0)
+    wins = performance_trades[performance_trades["pnl"] > 0]
+    losses = performance_trades[performance_trades["pnl"] < 0]
+    total_closed_trades = int(len(performance_trades))
+    average_win = float(wins["pnl"].mean()) if not wins.empty else 0.0
+    average_loss = float(losses["pnl"].mean()) if not losses.empty else 0.0
+
+    t1, t2, t3, t4, t5 = st.columns(5)
+    t1.metric("Live Setups", int(signals["signal"].astype(str).isin(["LONG SETUP", "SHORT SETUP"]).sum()) if not signals.empty else 0)
+    t2.metric("Open Trades", int(len(open_trades)))
+    t3.metric("Total P&L", f"${total_pnl:,.2f}")
+    t4.metric("Win Rate", f"{win_rate:.2f}%")
+    t5.metric("Average Loss", f"${average_loss:,.2f}")
+
+    if signals.empty:
+        st.markdown(
+            """
+            <div class="top-trade-banner" style="border-color: rgba(71, 85, 105, 0.7);">
+                <div class="top-trade-kicker" style="color: #cbd5e1;">Scanner Standing By</div>
+                <div class="app-subtitle">No live setups are active right now. Open trades and journal performance remain available below.</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    else:
+        sorted_signals = signals.sort_values("score", ascending=False).reset_index(drop=True)
+        best_setup = sorted_signals.iloc[0]
+        best_score = int(best_setup["score"])
+        verdict = get_setup_verdict(best_score)
+
+        st.markdown(
+            f"""
+            <div class="top-trade-banner">
+                <div class="top-trade-kicker">Top Setup</div>
+                <div class="top-trade-grid">
+                    <div class="top-trade-item">
+                        <div class="top-trade-label">Symbol</div>
+                        <div class="top-trade-value">{best_setup["symbol"]}</div>
+                    </div>
+                    <div class="top-trade-item">
+                        <div class="top-trade-label">Signal</div>
+                        <div class="top-trade-value">{best_setup["signal"]}</div>
+                    </div>
+                    <div class="top-trade-item">
+                        <div class="top-trade-label">Score</div>
+                        <div class="top-trade-value">{best_score}</div>
+                    </div>
+                    <div class="top-trade-item">
+                        <div class="top-trade-label">Entry</div>
+                        <div class="top-trade-value">{best_setup["entry"]}</div>
+                    </div>
+                    <div class="top-trade-item">
+                        <div class="top-trade-label">Stop</div>
+                        <div class="top-trade-value">{best_setup["stop_loss"]}</div>
+                    </div>
+                    <div class="top-trade-item">
+                        <div class="top-trade-label">Verdict</div>
+                        <div class="top-trade-value">{verdict}</div>
+                    </div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        st.markdown("### Ranked Setups")
+        for _, setup in sorted_signals.iterrows():
+            score = int(setup["score"])
+            setup_verdict = get_setup_verdict(score)
+            verdict_class = setup_verdict.lower()
+
+            st.markdown(
+                f"""
+                <div class="setup-card {verdict_class}">
+                    <div class="setup-card-header">
+                        <div>
+                            <div class="setup-symbol">{setup["symbol"]}</div>
+                            <div class="setup-signal">{setup["signal"]}</div>
+                        </div>
+                        <div class="setup-badge {verdict_class}">{setup_verdict}</div>
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+            top_metrics = st.columns(4)
+            top_metrics[0].metric("Score", score)
+            top_metrics[1].metric("Entry", f'{float(setup["entry"]):.4f}')
+            top_metrics[2].metric("Stop", f'{float(setup["stop_loss"]):.4f}')
+            top_metrics[3].metric("Rel Vol", f'{float(setup["rel_vol"]):.2f}x')
+
+            bottom_metrics = st.columns(4)
+            bottom_metrics[0].metric("TP1", f'{float(setup["take_profit_1"]):.4f}')
+            bottom_metrics[1].metric("TP2", f'{float(setup["take_profit_2"]):.4f}')
+            bottom_metrics[2].metric("Change %", f'{float(setup["change_pct"]):.2f}%')
+            bottom_metrics[3].metric("Shares", int(setup["shares"]))
+
+            open_symbols = {str(trade.get("symbol", "")) for trade in st.session_state.open_trades}
+            if str(setup["symbol"]) in open_symbols:
+                st.caption("Already open in Paper Trades")
+            elif st.button("Take Trade", key=f'trades-take-{setup["symbol"]}', use_container_width=True):
+                paper, added = add_paper_trade_from_setup(setup, paper)
+                if added:
+                    session_trade = {
+                        "symbol": str(setup["symbol"]),
+                        "entry": setup["entry"],
+                        "stop_loss": setup["stop_loss"],
+                        "take_profit_1": setup["take_profit_1"],
+                        "take_profit_2": setup["take_profit_2"],
+                        "shares": setup["shares"],
+                        "signal": str(setup["signal"]),
+                        "status": "OPEN",
+                    }
+                    st.session_state.open_trades.append(session_trade)
+                    save_paper_trades(paper)
+                    st.success("Trade added to Paper Trades")
+                else:
+                    st.info("Trade already open")
+
+            st.markdown("")
+
+    st.markdown("### Portfolio Snapshot")
+    portfolio_left, portfolio_right = st.columns(2)
+
+    with portfolio_left:
+        st.markdown("#### Open Paper Trades")
+        if open_trades.empty:
+            st.caption("No open paper trades.")
+        else:
+            open_columns = ["symbol", "signal", "entry", "stop_loss", "take_profit_1", "take_profit_2", "shares"]
+            available_open_columns = [col for col in open_columns if col in open_trades.columns]
+            st.dataframe(open_trades[available_open_columns].copy(), width="stretch", height=260)
+
+    with portfolio_right:
+        st.markdown("#### Journal Summary")
+        j1, j2, j3 = st.columns(3)
+        j1.metric("Closed Trades", total_closed_trades)
+        j2.metric("Average Win", f"${average_win:,.2f}")
+        j3.metric("Average Loss", f"${average_loss:,.2f}")
+
+    if performance_trades.empty:
+        st.caption("Performance charts and journal entries will appear once trades close.")
+    else:
+        chart_col1, chart_col2 = st.columns(2)
+
+        with chart_col1:
+            fig_perf, ax_perf = plt.subplots(figsize=(10.5, 4.6), facecolor="#0f172a")
+            ax_perf.plot(performance["trade_num"], performance["equity"], linewidth=2.8, color="#38bdf8")
+            ax_perf.fill_between(
+                performance["trade_num"],
+                performance["equity"],
+                performance["equity"].min(),
+                color="#38bdf8",
+                alpha=0.12,
+            )
+            style_dashboard_chart(ax_perf, "Equity Curve", "Trade Number", "Account Value")
+            fig_perf.tight_layout(pad=1.2)
+            st.pyplot(fig_perf)
+
+        with chart_col2:
+            fig_pnl, ax_pnl = plt.subplots(figsize=(10.5, 4.6), facecolor="#0f172a")
+            pnl_colors = ["#22c55e" if pnl >= 0 else "#ef4444" for pnl in performance["pnl"]]
+            ax_pnl.bar(performance["trade_num"], performance["pnl"], color=pnl_colors, width=0.65)
+            style_dashboard_chart(ax_pnl, "P&L Per Trade", "Trade Number", "P&L ($)")
+            ax_pnl.axhline(0, color="#64748b", linewidth=1.0, alpha=0.8)
+            fig_pnl.tight_layout(pad=1.2)
+            st.pyplot(fig_pnl)
+
+        st.markdown("### Closed Trade Journal")
+        journal_columns = [
+            "symbol",
+            "signal",
+            "time",
+            "close_time",
+            "entry",
+            "exit_price",
+            "shares",
+            "status",
+            "exit_reason",
+            "pnl",
+        ]
+        available_journal_columns = [col for col in journal_columns if col in performance_trades.columns]
+        st.dataframe(performance_trades[available_journal_columns].copy(), width="stretch", height=320)
 
 elif page == "Live Signals":
     render_page_header(
