@@ -576,6 +576,8 @@ elif page == "MashGPT":
         st.session_state.chat_history = [
             ("assistant", "Ask me about the best setup, trade confidence, risk/reward, or any general question.")
         ]
+    if "response_times" not in st.session_state:
+        st.session_state.response_times = []
 
     for role, content in st.session_state.chat_history:
         avatar = "🙂" if role == "user" else "🤖"
@@ -590,11 +592,16 @@ elif page == "MashGPT":
             st.write(prompt)
 
         with st.chat_message("assistant", avatar="🤖"):
+            recent_times = st.session_state.response_times
+            estimated_time = sum(recent_times) / len(recent_times) if recent_times else 4.0
+            status_placeholder = st.empty()
+            status_placeholder.caption(f"Estimated time remaining: {estimated_time:.1f}s")
             start_time = time.time()
             with st.spinner("MashGPT is analyzing the market..."):
                 reply = ask_mashgpt(prompt, signals, open_trades, closed_trades)
             duration = time.time() - start_time
-            st.caption(f"Done in {duration:.2f}s")
+            st.session_state.response_times = (recent_times + [duration])[-5:]
+            status_placeholder.caption(f"Done in {duration:.2f}s")
             st.write(reply)
 
         st.session_state.chat_history.append(("assistant", reply))
