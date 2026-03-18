@@ -601,34 +601,10 @@ elif page == "Live Market":
 
     watchlist = ["AAPL", "NVDA", "META", "MSFT", "TSLA", "AMZN", "SPY", "QQQ"]
 
-    # ---------------- TOP BAR ----------------
-    top1, top2, top3 = st.columns([1.2, 1.2, 1.6])
+selected_symbol = st.session_state.get("live_market_symbol", "NVDA")
 
-    with top1:
-        default_symbol = st.session_state.get("live_market_symbol", "NVDA")
-        default_index = watchlist.index(default_symbol) if default_symbol in watchlist else 0
-
-        selected_symbol = st.selectbox(
-            "Ticker",
-            options=watchlist,
-            index=default_index,
-        )
-
-    with top2:
-        timeframe = st.selectbox(
-            "Timeframe",
-            ["1", "5", "15", "30", "60", "D", "W"],
-            index=4,
-        )
-
-    with top3:
-        custom_symbol = st.text_input(
-            "Search ticker",
-            value=selected_symbol,
-        ).upper().strip()
-
-    if custom_symbol:
-        selected_symbol = custom_symbol
+# default timeframe (TradingView will handle UI anyway)
+timeframe = "60"
 
     st.session_state["live_market_symbol"] = selected_symbol
 
