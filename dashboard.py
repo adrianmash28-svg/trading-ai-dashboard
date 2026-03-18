@@ -969,13 +969,13 @@ elif page == "Live Market":
     st.markdown(f"### {selected_symbol} Chart")
 
     tradingview_html = f"""
-    <div id="tradingview_chart" style="width:100%; height:950px;"></div>
+    <div id="tradingview_chart" style="width:100%; height:720px;"></div>
 
     <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
     <script type="text/javascript">
       new TradingView.widget({{
         "width": "100%",
-        "height": 950,
+        "height": 720,
         "symbol": "{selected_symbol}",
         "interval": "{timeframe}",
         "timezone": "America/Los_Angeles",
@@ -994,9 +994,8 @@ elif page == "Live Market":
     </script>
     """
 
-    chart_left, chart_center, chart_right = st.columns([0.08, 0.84, 0.08])
-    with chart_center:
-        components.html(tradingview_html, height=970)
+    with st.container():
+        components.html(tradingview_html, height=740)
 
     st.caption("Chart display by TradingView. Live stats use Polygon when available.")
 
