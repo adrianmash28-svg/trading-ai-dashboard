@@ -761,7 +761,7 @@ total_pnl = round(float(performance["pnl"].sum()), 2)
 
 page = st.sidebar.radio(
     "Navigate",
-    ["Dashboard", "Setups", "Live Signals", "Paper Trades", "MashGPT", "Live Market"],
+    ["Command Center", "Dashboard", "Setups", "Live Signals", "Paper Trades", "MashGPT", "Live Market"],
 )
 
 st.sidebar.markdown("---")
@@ -810,7 +810,98 @@ m3.metric("Open Paper Trades", int(len(open_trades)))
 m4.metric("Live Setups", int((signals["signal"] == "SHORT SETUP").sum()) if not signals.empty else 0)
 
 
-if page == "Dashboard":
+if page == "Command Center":
+    st.subheader("Command Center")
+
+    if not signals.empty:
+        top_setup = signals.sort_values("score", ascending=False).iloc[0]
+        st.markdown(
+            f"""
+            <div class="top-trade-banner">
+                <div class="top-trade-kicker">Top Setup Right Now</div>
+                <div class="top-trade-grid">
+                    <div class="top-trade-item">
+                        <div class="top-trade-label">Symbol</div>
+                        <div class="top-trade-value">{top_setup["symbol"]}</div>
+                    </div>
+                    <div class="top-trade-item">
+                        <div class="top-trade-label">Score</div>
+                        <div class="top-trade-value">{int(top_setup["score"])}</div>
+                    </div>
+                    <div class="top-trade-item">
+                        <div class="top-trade-label">Entry</div>
+                        <div class="top-trade-value">{top_setup["entry"]}</div>
+                    </div>
+                    <div class="top-trade-item">
+                        <div class="top-trade-label">Stop</div>
+                        <div class="top-trade-value">{top_setup["stop_loss"]}</div>
+                    </div>
+                    <div class="top-trade-item">
+                        <div class="top-trade-label">TP1</div>
+                        <div class="top-trade-value">{top_setup["take_profit_1"]}</div>
+                    </div>
+                    <div class="top-trade-item">
+                        <div class="top-trade-label">TP2</div>
+                        <div class="top-trade-value">{top_setup["take_profit_2"]}</div>
+                    </div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    else:
+        st.info("No live setup available right now.")
+
+    cc1, cc2, cc3, cc4 = st.columns(4)
+    cc1.metric("Trading Mode", trading_mode)
+    cc2.metric("Open Trades", int(len(open_trades)))
+    cc3.metric("Live Setups", int((signals["signal"] == "SHORT SETUP").sum()) if not signals.empty else 0)
+    cc4.metric("Paper P&L", f"${round(float(paper_pnl), 2)}")
+
+    left_col, right_col = st.columns([1.15, 0.85])
+
+    with left_col:
+        st.markdown("### Open Paper Trades")
+        if open_trades.empty:
+            st.caption("No open paper trades.")
+        else:
+            open_summary = open_trades[["symbol", "entry", "stop_loss", "take_profit_1", "take_profit_2"]].copy()
+            st.dataframe(open_summary, width="stretch", height=240)
+
+        st.markdown("### Quick Prompt")
+        quick_prompt = st.text_input(
+            "Ask MashGPT from Command Center",
+            key="command_center_prompt",
+            placeholder="What is the best setup right now?",
+            label_visibility="collapsed",
+        )
+        if st.button("Ask MashGPT", key="command-center-ask", use_container_width=True) and quick_prompt.strip():
+            st.session_state.command_center_reply = ask_mashgpt(quick_prompt, signals, open_trades, closed_trades)
+        if st.session_state.get("command_center_reply"):
+            st.info(st.session_state["command_center_reply"])
+
+    with right_col:
+        st.markdown("### Recent Activity")
+        recent_items = []
+        if new_logged:
+            recent_items.append(f"{new_logged} new trade(s) opened this refresh")
+        if newly_closed:
+            recent_items.append(f"{newly_closed} trade(s) closed this refresh")
+        if not closed_trades.empty:
+            last_closed = closed_trades.iloc[-1]
+            recent_items.append(
+                f"Last closed: {last_closed['symbol']} {last_closed['exit_reason']} ({last_closed['status']})"
+            )
+        if not signals.empty:
+            recent_items.append(f"Active leader: {signals.iloc[0]['symbol']} score {int(signals.iloc[0]['score'])}")
+
+        if recent_items:
+            for item in recent_items[:4]:
+                st.markdown(f"- {item}")
+        else:
+            st.caption("No recent activity yet.")
+
+elif page == "Dashboard":
     if not signals.empty:
         best_signal = signals.sort_values("score", ascending=False).iloc[0]
         st.markdown(
