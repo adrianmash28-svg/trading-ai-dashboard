@@ -65,6 +65,7 @@ MAX_DRAWDOWN_DEGRADATION = 0.10
 APP_TIMEZONE = ZoneInfo("America/Los_Angeles")
 RESEARCH_LOOP_HOURS = 4
 MAX_ONLINE_SCORE_ADJUSTMENT = 6
+NEWS_LOOKBACK_HOURS = 48
 
 
 def get_openai_client():
@@ -446,6 +447,7 @@ def ensure_paper_trades_file():
         "reason",
         "signal",
         "sentiment_score",
+        "recent_news",
         "macro_regime",
         "event_caution",
         "online_score_adjustment",
@@ -547,45 +549,89 @@ def get_market_bias(df: pd.DataFrame) -> str:
 
 
 @st.cache_data(ttl=900)
-def get_symbol_news_context(symbol: str):
+def get_polygon_news_context(symbol: str):
+    fallback = {
+        "sentiment_score": 0.0,
+        "recent_news": "No",
+        "event_caution": False,
+        "event_caution_label": "None",
+        "news_adjustment": 0,
+        "news_affected": False,
+    }
+    if not POLYGON_API_KEY:
+        return fallback
+
+    normalized_symbol = str(symbol).upper()
+    if "-" in normalized_symbol or normalized_symbol.startswith("^"):
+        return fallback
+
     try:
-        news_items = yf.Ticker(symbol).news or []
+        cutoff = pd.Timestamp.now(tz="UTC") - pd.Timedelta(hours=NEWS_LOOKBACK_HOURS)
+        response = requests.get(
+            "https://api.polygon.io/v2/reference/news",
+            params={
+                "ticker": normalized_symbol,
+                "limit": 10,
+                "order": "desc",
+                "sort": "published_utc",
+                "apiKey": POLYGON_API_KEY,
+            },
+            timeout=10,
+        )
+        payload = response.json() if response.ok else {}
+        news_items = payload.get("results", []) or []
     except Exception:
-        return {
-            "sentiment_score": 0.0,
-            "event_caution": False,
-            "event_caution_label": "None",
-            "news_adjustment": 0,
-            "news_affected": False,
-        }
+        return fallback
+
+    if not news_items:
+        return fallback
 
     positive_terms = ["beat", "surge", "growth", "upside", "bullish", "strong", "expands", "record", "gain"]
     negative_terms = ["miss", "drop", "cut", "lawsuit", "downgrade", "weak", "bearish", "loss", "fall"]
     caution_terms = ["earnings", "fomc", "fed", "cpi", "inflation", "jobs report", "guidance", "sec", "investigation"]
 
+    recent_items = []
+    for item in news_items:
+        published = pd.to_datetime(item.get("published_utc"), utc=True, errors="coerce")
+        if pd.isna(published) or published < cutoff:
+            continue
+        recent_items.append(item)
+
+    if not recent_items:
+        return fallback
+
     sentiment_points = 0
     caution_hits = 0
-    for item in news_items[:8]:
-        text = f"{item.get('title', '')} {item.get('summary', '')}".lower()
-        sentiment_points += sum(term in text for term in positive_terms)
-        sentiment_points -= sum(term in text for term in negative_terms)
-        caution_hits += sum(term in text for term in caution_terms)
+    for item in recent_items[:6]:
+        insights = " ".join(
+            [
+                str(item.get("title", "")),
+                str(item.get("description", "")),
+                str(item.get("article_url", "")),
+                " ".join(str(keyword) for keyword in item.get("keywords", []) or []),
+            ]
+        ).lower()
+        sentiment_points += sum(term in insights for term in positive_terms)
+        sentiment_points -= sum(term in insights for term in negative_terms)
+        caution_hits += sum(term in insights for term in caution_terms)
 
     sentiment_score = max(min(sentiment_points / 6.0, 1.0), -1.0)
     event_caution = caution_hits > 0
     news_adjustment = 0
     if sentiment_score >= 0.35:
-        news_adjustment = 2
+        news_adjustment = 3
     elif sentiment_score <= -0.35:
-        news_adjustment = -2
+        news_adjustment = -3
     if event_caution:
-        news_adjustment -= 2
+        news_adjustment -= 2 if news_adjustment >= 0 else 1
+    news_adjustment = int(max(min(news_adjustment, 10), -10))
 
     return {
         "sentiment_score": round(sentiment_score, 2),
+        "recent_news": "Yes",
         "event_caution": event_caution,
         "event_caution_label": "High" if event_caution else "None",
-        "news_adjustment": int(news_adjustment),
+        "news_adjustment": news_adjustment,
         "news_affected": bool(news_adjustment or event_caution),
     }
 
@@ -640,7 +686,7 @@ def build_signal_snapshot(
         return None
 
     params = sanitize_strategy_parameters(strategy_params)
-    news_context = get_symbol_news_context(symbol)
+    news_context = get_polygon_news_context(symbol)
     macro_context = get_macro_regime_context()
     work_df = df.copy()
     work_df["ema_short"] = work_df["Close"].ewm(span=params["ema_short_len"], adjust=False).mean()
@@ -814,6 +860,7 @@ def build_signal_snapshot(
         "reason": reason,
         "signal": signal,
         "sentiment_score": news_context["sentiment_score"],
+        "recent_news": news_context["recent_news"],
         "macro_regime": macro_context["macro_regime"],
         "event_caution": news_context["event_caution_label"],
         "online_score_adjustment": int(online_adjustment),
@@ -1424,6 +1471,7 @@ def log_active_signals(signals: pd.DataFrame, paper: pd.DataFrame):
             "reason": row.get("reason", ""),
             "signal": row["signal"],
             "sentiment_score": row.get("sentiment_score", 0.0),
+            "recent_news": row.get("recent_news", "No"),
             "macro_regime": row.get("macro_regime", "neutral"),
             "event_caution": row.get("event_caution", "None"),
             "online_score_adjustment": row.get("online_score_adjustment", 0),
@@ -1563,6 +1611,7 @@ def add_paper_trade_from_setup(setup_row, paper_df: pd.DataFrame):
         "reason": str(setup_row.get("reason", "")),
         "signal": setup_row["signal"],
         "sentiment_score": setup_row.get("sentiment_score", 0.0),
+        "recent_news": setup_row.get("recent_news", "No"),
         "macro_regime": setup_row.get("macro_regime", "neutral"),
         "event_caution": setup_row.get("event_caution", "None"),
         "online_score_adjustment": setup_row.get("online_score_adjustment", 0),
@@ -1665,6 +1714,7 @@ def render_trade_insights_section(trade_log: pd.DataFrame):
             "signal",
             "reason",
             "sentiment_score",
+            "recent_news",
             "macro_regime",
             "event_caution",
             "online_score_adjustment",
@@ -2472,6 +2522,7 @@ if page == "Home":
             bottom_metrics[3].metric("Signal", str(setup["signal"]))
             st.caption(
                 f"Context: sentiment {float(setup.get('sentiment_score', 0.0)):+.2f} | "
+                f"recent news {str(setup.get('recent_news', 'No'))} | "
                 f"macro {str(setup.get('macro_regime', 'neutral'))} | "
                 f"caution {str(setup.get('event_caution', 'None'))} | "
                 f"online adj {int(pd.to_numeric(setup.get('online_score_adjustment', 0), errors='coerce') or 0):+d}"
@@ -2501,6 +2552,7 @@ if page == "Home":
                             "reason": str(setup.get("reason", "")),
                             "signal": str(setup["signal"]),
                             "sentiment_score": setup.get("sentiment_score", 0.0),
+                            "recent_news": setup.get("recent_news", "No"),
                             "macro_regime": setup.get("macro_regime", "neutral"),
                             "event_caution": setup.get("event_caution", "None"),
                             "online_score_adjustment": setup.get("online_score_adjustment", 0),
@@ -2518,7 +2570,7 @@ if page == "Home":
     if open_trades.empty:
         st.caption("No open paper trades.")
     else:
-        open_summary = open_trades[["symbol", "signal", "entry", "stop_loss", "take_profit_1", "take_profit_2", "sentiment_score", "macro_regime", "event_caution", "online_score_adjustment"]].copy()
+        open_summary = open_trades[["symbol", "signal", "entry", "stop_loss", "take_profit_1", "take_profit_2", "sentiment_score", "recent_news", "macro_regime", "event_caution", "online_score_adjustment"]].copy()
         st.dataframe(open_summary, width="stretch", height=220)
 
     st.markdown("### Algo Status")
@@ -3053,6 +3105,7 @@ elif page == "Trades":
                         "reason": str(setup.get("reason", "")),
                         "signal": str(setup["signal"]),
                         "sentiment_score": setup.get("sentiment_score", 0.0),
+                        "recent_news": setup.get("recent_news", "No"),
                         "macro_regime": setup.get("macro_regime", "neutral"),
                         "event_caution": setup.get("event_caution", "None"),
                         "online_score_adjustment": setup.get("online_score_adjustment", 0),
@@ -3340,6 +3393,7 @@ elif page == "Setups":
                         "reason": str(setup.get("reason", "")),
                         "signal": str(setup["signal"]),
                         "sentiment_score": setup.get("sentiment_score", 0.0),
+                        "recent_news": setup.get("recent_news", "No"),
                         "macro_regime": setup.get("macro_regime", "neutral"),
                         "event_caution": setup.get("event_caution", "None"),
                         "online_score_adjustment": setup.get("online_score_adjustment", 0),
