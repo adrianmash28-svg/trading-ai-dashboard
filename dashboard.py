@@ -538,121 +538,110 @@ elif page == "Live Market":
 
     watchlist = ["AAPL", "NVDA", "META", "MSFT", "TSLA", "AMZN", "SPY", "QQQ"]
 
-    left, right = st.columns([1, 3], gap="large")
+    # ---------------- TOP: MARKET PANEL ----------------
+    st.markdown("### Market Panel")
 
-    with left:
-        st.markdown("### Market Panel")
+    top1, top2, top3 = st.columns([1.2, 1.2, 1.6])
 
-        default_symbol = st.session_state.get("live_market_symbol", "NVDA")
-        default_index = watchlist.index(default_symbol) if default_symbol in watchlist else 0
-
+    with top1:
         selected_symbol = st.selectbox(
             "Ticker",
             options=watchlist,
-            index=default_index,
+            index=watchlist.index(st.session_state.get("live_market_symbol", "NVDA"))
+            if st.session_state.get("live_market_symbol", "NVDA") in watchlist
+            else 0,
         )
 
-        custom_symbol = st.text_input(
-            "Search ticker",
-            value=default_symbol
-        ).upper().strip()
-
-        if custom_symbol:
-            selected_symbol = custom_symbol
-
-        st.session_state["live_market_symbol"] = selected_symbol
-
+    with top2:
         timeframe = st.selectbox(
             "Timeframe",
             ["1", "5", "15", "30", "60", "D", "W"],
             index=4,
         )
 
-        market_df = fetch_history(
-            selected_symbol,
-            period="6mo" if timeframe in ["D", "W"] else "5d",
-            interval="1d" if timeframe in ["D", "W"] else "15m",
-        )
+    with top3:
+        custom_symbol = st.text_input("Search ticker", value=selected_symbol).upper().strip()
 
-        st.markdown("### Quick Picks")
-        q1, q2 = st.columns(2)
-        if q1.button("NVDA", use_container_width=True):
-            st.session_state["live_market_symbol"] = "NVDA"
-            st.rerun()
-        if q2.button("AAPL", use_container_width=True):
-            st.session_state["live_market_symbol"] = "AAPL"
-            st.rerun()
+    if custom_symbol:
+        selected_symbol = custom_symbol
 
-        q3, q4 = st.columns(2)
-        if q3.button("TSLA", use_container_width=True):
-            st.session_state["live_market_symbol"] = "TSLA"
-            st.rerun()
-        if q4.button("SPY", use_container_width=True):
-            st.session_state["live_market_symbol"] = "SPY"
-            st.rerun()
+    st.session_state["live_market_symbol"] = selected_symbol
 
-        if not market_df.empty:
-            latest_close = float(market_df["Close"].iloc[-1])
-            first_close = float(market_df["Close"].iloc[0])
-            change_pct = ((latest_close - first_close) / first_close) * 100 if first_close != 0 else 0.0
-            latest_volume = int(market_df["Volume"].iloc[-1])
-            high_val = float(market_df["High"].max())
-            low_val = float(market_df["Low"].min())
+    quick1, quick2, quick3, quick4 = st.columns(4)
+    if quick1.button("NVDA", use_container_width=True):
+        st.session_state["live_market_symbol"] = "NVDA"
+        st.rerun()
+    if quick2.button("AAPL", use_container_width=True):
+        st.session_state["live_market_symbol"] = "AAPL"
+        st.rerun()
+    if quick3.button("TSLA", use_container_width=True):
+        st.session_state["live_market_symbol"] = "TSLA"
+        st.rerun()
+    if quick4.button("SPY", use_container_width=True):
+        st.session_state["live_market_symbol"] = "SPY"
+        st.rerun()
 
-            st.markdown("### Stats")
+    market_df = fetch_history(
+        selected_symbol,
+        period="6mo" if timeframe in ["D", "W"] else "5d",
+        interval="1d" if timeframe in ["D", "W"] else "15m",
+    )
 
-            s1, s2 = st.columns(2)
-            s1.metric("Last", round(latest_close, 2))
-            s2.metric("Change %", round(change_pct, 2))
+    st.markdown("---")
 
-            s3, s4 = st.columns(2)
-            s3.metric("High", round(high_val, 2))
-            s4.metric("Low", round(low_val, 2))
-
-            st.metric("Volume", f"{latest_volume:,}")
-        else:
-            st.warning(f"No data found for {selected_symbol}")
-
-with right:
+    # ---------------- MIDDLE: BIG CHART ----------------
     st.markdown(f"### {selected_symbol} Chart")
 
-    # center the chart and make it narrower + taller
-    c_left, c_mid, c_right = st.columns([1, 2.2, 1])
+    tradingview_html = f"""
+    <div id="tradingview_chart" style="width:100%; height:1000px;"></div>
 
-    with c_mid:
-        tradingview_html = f"""
-<div class="tradingview-widget-container" style="height:1400px;width:100%">
-  <div id="tradingview_chart" style="height:100%;width:100%"></div>
+    <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+    <script type="text/javascript">
+      new TradingView.widget({{
+        "width": "100%",
+        "height": 1000,
+        "symbol": "{selected_symbol}",
+        "interval": "{timeframe}",
+        "timezone": "America/Los_Angeles",
+        "theme": "dark",
+        "style": "1",
+        "locale": "en",
+        "toolbar_bg": "#0b1220",
+        "enable_publishing": false,
+        "allow_symbol_change": true,
+        "hide_top_toolbar": false,
+        "hide_legend": false,
+        "save_image": false,
+        "withdateranges": true,
+        "container_id": "tradingview_chart"
+      }});
+    </script>
+    """
 
-  <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+    components.html(tradingview_html, height=1020)
 
-  <script type="text/javascript">
-    new TradingView.widget({{
-      "width": "100%",
-      "height": "100%",
-      "symbol": "{selected_symbol}",
-      "interval": "{timeframe}",
-      "timezone": "America/Los_Angeles",
-      "theme": "dark",
-      "style": "1",
-      "locale": "en",
-      "toolbar_bg": "#0b1220",
-      "enable_publishing": false,
-      "allow_symbol_change": true,
-      "hide_top_toolbar": false,
-      "hide_legend": false,
-      "save_image": false,
-      "withdateranges": true,
-      "container_id": "tradingview_chart"
-    }});
-  </script>
-</div>
-"""
+    st.markdown("---")
 
-components.html(tradingview_html, height=1400)
+    # ---------------- BOTTOM: STATS ----------------
+    st.markdown("### Stats")
 
     if not market_df.empty:
-        with st.expander("Show raw market data"):
-            st.dataframe(market_df.tail(100), width="stretch", height=220)
+        latest_close = float(market_df["Close"].iloc[-1])
+        first_close = float(market_df["Close"].iloc[0])
+        change_pct = ((latest_close - first_close) / first_close) * 100 if first_close != 0 else 0.0
+        latest_volume = int(market_df["Volume"].iloc[-1])
+        high_val = float(market_df["High"].max())
+        low_val = float(market_df["Low"].min())
 
-        components.html(tradingview_html, height=1000)
+        s1, s2, s3, s4, s5 = st.columns(5)
+        s1.metric("Last", f"{latest_close:.2f}")
+        s2.metric("Change %", f"{change_pct:.2f}%")
+        s3.metric("High", f"{high_val:.2f}")
+        s4.metric("Low", f"{low_val:.2f}")
+        s5.metric("Volume", f"{latest_volume:,}")
+    else:
+        st.warning(f"No data found for {selected_symbol}")
+
+    with st.expander("Show raw market data"):
+        if not market_df.empty:
+            st.dataframe(market_df.tail(100), width="stretch", height=220)
