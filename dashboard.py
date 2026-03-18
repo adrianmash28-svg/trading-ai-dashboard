@@ -1,5 +1,3 @@
-Replace your entire dashboard.py with this:
-
 import os
 from datetime import datetime
 
