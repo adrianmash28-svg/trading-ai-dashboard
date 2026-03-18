@@ -997,7 +997,7 @@ total_pnl = round(float(performance["pnl"].sum()), 2)
 
 page = st.sidebar.radio(
     "Navigate",
-    ["Command Center", "Dashboard", "Setups", "Live Signals", "Paper Trades", "MashGPT", "Live Market"],
+    ["Command Center", "Dashboard", "Performance", "Setups", "Live Signals", "Paper Trades", "MashGPT", "Live Market"],
 )
 
 st.sidebar.markdown("---")
@@ -1228,6 +1228,96 @@ elif page == "Dashboard":
     a1, a2 = st.columns(2)
     a1.metric("New Logged This Refresh", new_logged)
     a2.metric("Closed This Refresh", newly_closed)
+
+elif page == "Performance":
+    render_page_header(
+        "Performance",
+        "Review closed-trade analytics, equity growth, and win-loss behavior in a cleaner journal-style view.",
+        "Trade Journal",
+    )
+
+    if closed_trades.empty:
+        st.markdown(
+            """
+            <div class="top-trade-banner" style="border-color: rgba(71, 85, 105, 0.7);">
+                <div class="top-trade-kicker" style="color: #cbd5e1;">No Closed Trades Yet</div>
+                <div class="app-subtitle">Closed trades will appear here once paper positions finish and the journal has performance data to analyze.</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    else:
+        performance_trades = closed_trades.copy()
+        performance_trades["pnl"] = pd.to_numeric(performance_trades["pnl"], errors="coerce").fillna(0.0)
+        wins = performance_trades[performance_trades["pnl"] > 0]
+        losses = performance_trades[performance_trades["pnl"] < 0]
+        total_closed_trades = int(len(performance_trades))
+        average_win = float(wins["pnl"].mean()) if not wins.empty else 0.0
+        average_loss = float(losses["pnl"].mean()) if not losses.empty else 0.0
+
+        p1, p2, p3, p4, p5 = st.columns(5)
+        p1.metric("Total P&L", f"${total_pnl:,.2f}")
+        p2.metric("Win Rate", f"{win_rate:.2f}%")
+        p3.metric("Total Trades", total_closed_trades)
+        p4.metric("Average Win", f"${average_win:,.2f}")
+        p5.metric("Average Loss", f"${average_loss:,.2f}")
+
+        chart_col1, chart_col2 = st.columns(2)
+
+        with chart_col1:
+            fig_perf, ax_perf = plt.subplots(figsize=(10.5, 4.8), facecolor="#0f172a")
+            ax_perf.plot(performance["trade_num"], performance["equity"], linewidth=2.8, color="#38bdf8")
+            ax_perf.fill_between(
+                performance["trade_num"],
+                performance["equity"],
+                performance["equity"].min(),
+                color="#38bdf8",
+                alpha=0.12,
+            )
+            style_dashboard_chart(ax_perf, "Equity Curve", "Trade Number", "Account Value")
+            fig_perf.tight_layout(pad=1.2)
+            st.pyplot(fig_perf)
+
+        with chart_col2:
+            fig_pnl, ax_pnl = plt.subplots(figsize=(10.5, 4.8), facecolor="#0f172a")
+            pnl_colors = ["#22c55e" if pnl >= 0 else "#ef4444" for pnl in performance["pnl"]]
+            ax_pnl.bar(performance["trade_num"], performance["pnl"], color=pnl_colors, width=0.65)
+            style_dashboard_chart(ax_pnl, "P&L Per Trade", "Trade Number", "P&L ($)")
+            ax_pnl.axhline(0, color="#64748b", linewidth=1.0, alpha=0.8)
+            fig_pnl.tight_layout(pad=1.2)
+            st.pyplot(fig_pnl)
+
+        fig_outcomes, ax_outcomes = plt.subplots(figsize=(10.5, 3.8), facecolor="#0f172a")
+        outcome_counts = pd.Series(
+            {
+                "Wins": int((performance_trades["pnl"] > 0).sum()),
+                "Losses": int((performance_trades["pnl"] < 0).sum()),
+            }
+        )
+        ax_outcomes.bar(outcome_counts.index, outcome_counts.values, color=["#22c55e", "#ef4444"], width=0.55)
+        style_dashboard_chart(ax_outcomes, "Win vs Loss", "Outcome", "Trades")
+        fig_outcomes.tight_layout(pad=1.2)
+        st.pyplot(fig_outcomes)
+
+        st.markdown("### Closed Trade Journal")
+        journal_columns = [
+            "symbol",
+            "signal",
+            "time",
+            "close_time",
+            "entry",
+            "exit_price",
+            "shares",
+            "status",
+            "exit_reason",
+            "pnl",
+        ]
+        available_journal_columns = [col for col in journal_columns if col in performance_trades.columns]
+        st.dataframe(
+            performance_trades[available_journal_columns].copy(),
+            width="stretch",
+            height=340,
+        )
 
 elif page == "Live Signals":
     render_page_header(
