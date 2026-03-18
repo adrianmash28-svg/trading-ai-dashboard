@@ -645,10 +645,6 @@ elif page == "Live Market":
         polygon_prev = get_polygon_prev_day(selected_symbol)
         market_status = get_polygon_market_status()
 
-        if market_status:
-            market_name = market_status.get("market", "unknown")
-            st.caption(f"Market status: {market_name}")
-
         if polygon_trade and polygon_prev:
             latest_close = float(polygon_trade["price"]) if polygon_trade.get("price") is not None else None
             prev_close = float(polygon_prev["close"]) if polygon_prev.get("close") is not None else None
