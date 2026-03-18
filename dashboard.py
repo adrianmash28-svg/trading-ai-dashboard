@@ -2146,7 +2146,7 @@ total_pnl = round(float(performance["pnl"].sum()), 2)
 
 page = st.sidebar.radio(
     "Workspace",
-    ["Home", "Money View", "Performance", "Trade Insights", "Market", "MashGPT", "About"],
+    ["Home", "Money View", "Performance", "Trade Insights", "Market", "MashGPT"],
 )
 
 st.sidebar.markdown("---")
