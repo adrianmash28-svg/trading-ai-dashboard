@@ -41,14 +41,14 @@ VERIZON_SMS_GATEWAY = "3109911161@vtext.com"
 
 PAPER_TRADES_FILE = "paper_trades.csv"
 DEFAULT_SYMBOLS = ["META", "NVDA", "AAPL", "MSFT"]
-BACKTEST_SYMBOLS = ["SPY", "QQQ", "NVDA", "TSLA", "AAPL", "MSFT"]
+BACKTEST_SYMBOLS = ["SPY", "QQQ", "NVDA", "TSLA", "AAPL", "MSFT", "META", "AMZN", "GOOGL", "AMD"]
 STRATEGY_REGISTRY_FILE = "strategy_registry.json"
 ALGO_UPDATE_STATE_FILE = "algo_update_state.json"
 STARTING_EQUITY = 10000.0
 RISK_PER_TRADE = 0.01
 APPROVED_EMA_SHORT = [10, 12, 20]
 APPROVED_EMA_LONG = [34, 50, 60]
-APPROVED_SCORE_THRESHOLDS = [60, 65, 70]
+APPROVED_SCORE_THRESHOLDS = [60, 65, 70, 75]
 APPROVED_RSI_LONG = [55, 58, 60]
 APPROVED_RSI_SHORT = [45, 42, 40]
 APPROVED_REL_VOL = [1.5, 1.6, 1.8]
@@ -79,20 +79,20 @@ client = get_openai_client()
 
 def default_strategy_parameters():
     return {
-        "score_threshold": 60,
-        "rsi_long_min": 55,
-        "rsi_short_max": 45,
-        "rel_vol_min": 1.5,
+        "score_threshold": 70,
+        "rsi_long_min": 58,
+        "rsi_short_max": 42,
+        "rel_vol_min": 1.6,
         "ema_short_len": 20,
         "ema_long_len": 50,
         "stop_multiplier": 1.0,
-        "tp1_multiplier": 1.5,
-        "tp2_multiplier": 2.3,
-        "trend_weight": 30,
+        "tp1_multiplier": 1.7,
+        "tp2_multiplier": 2.6,
+        "trend_weight": 34,
         "momentum_weight": 18,
-        "volume_weight": 12,
-        "structure_weight": 18,
-        "rr_weight": 20,
+        "volume_weight": 16,
+        "structure_weight": 24,
+        "rr_weight": 24,
     }
 
 
@@ -156,6 +156,19 @@ def load_strategy_registry():
     ensure_strategy_registry()
     with open(STRATEGY_REGISTRY_FILE, "r", encoding="utf-8") as f:
         registry = json.load(f)
+    if registry["champion"].get("version", 1) < 2:
+        registry["previous_champion"] = registry.get("champion")
+        registry["champion"] = {
+            "id": "champion-v2",
+            "version": 2,
+            "status": "champion",
+            "parameters": default_strategy_parameters(),
+            "results_summary": {},
+            "promotion_status": "Live champion tightened for higher-quality setups",
+            "paper_probation_passed": True,
+            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        save_strategy_registry(registry)
     registry["champion"]["parameters"] = sanitize_strategy_parameters(registry["champion"].get("parameters", {}))
     if registry.get("challenger"):
         registry["challenger"]["parameters"] = sanitize_strategy_parameters(registry["challenger"].get("parameters", {}))
@@ -556,26 +569,26 @@ def build_signal_snapshot(
     long_rr = long_reward / long_risk if long_risk > 0 else 0.0
     short_rr = short_reward / short_risk if short_risk > 0 else 0.0
 
-    if long_rr >= 2.2:
+    if long_rr >= 2.5:
         long_score += params["rr_weight"]
-    elif long_rr >= 1.7:
+    elif long_rr >= 2.0:
         long_score += 10
-    if short_rr >= 2.2:
+    if short_rr >= 2.5:
         short_score += params["rr_weight"]
-    elif short_rr >= 1.7:
+    elif short_rr >= 2.0:
         short_score += 10
 
     allow_long = market_bias == "bullish"
     allow_short = market_bias == "bearish"
 
-    if long_score >= short_score and long_score >= params["score_threshold"] and trend_up and rel_vol >= params["rel_vol_min"] and rsi14 > params["rsi_long_min"] and long_rr >= 1.7 and allow_long:
+    if long_score >= short_score and long_score >= params["score_threshold"] and trend_up and rel_vol >= params["rel_vol_min"] and rsi14 > params["rsi_long_min"] and long_rr >= 2.0 and allow_long:
         signal = "LONG SETUP"
         score = long_score
         risk = long_risk * params["stop_multiplier"]
         stop_loss = round(close_price - risk, 4)
         tp1 = round(close_price + max(risk * params["tp1_multiplier"], recent_range * 0.2), 4)
         tp2 = round(close_price + max(risk * params["tp2_multiplier"], recent_range * 0.35), 4)
-    elif short_score > long_score and short_score >= params["score_threshold"] and trend_down and rel_vol >= params["rel_vol_min"] and rsi14 < params["rsi_short_max"] and short_rr >= 1.7 and allow_short:
+    elif short_score > long_score and short_score >= params["score_threshold"] and trend_down and rel_vol >= params["rel_vol_min"] and rsi14 < params["rsi_short_max"] and short_rr >= 2.0 and allow_short:
         signal = "SHORT SETUP"
         score = short_score
         risk = short_risk * params["stop_multiplier"]
@@ -634,7 +647,7 @@ def calc_live_signals(symbols):
 
 
 @st.cache_data(ttl=900)
-def run_strategy_backtest(symbols, period: str = "2y", interval: str = "1d", strategy_params_json: str = "") -> pd.DataFrame:
+def run_strategy_backtest(symbols, period: str = "3y", interval: str = "1d", strategy_params_json: str = "") -> pd.DataFrame:
     results = []
     current_equity = STARTING_EQUITY
     market_history = fetch_history("SPY", period=period, interval=interval)
@@ -890,7 +903,7 @@ def compare_strategy_results(champion_summary, challenger_summary):
 def run_validation_split(symbols, params):
     all_trades = run_strategy_backtest(
         tuple(symbols),
-        period="2y",
+        period="3y",
         interval="1d",
         strategy_params_json=json.dumps(sanitize_strategy_parameters(params), sort_keys=True),
     )
@@ -2024,12 +2037,12 @@ elif page == "Performance":
 
     champion_params = strategy_registry["champion"]["parameters"]
     st.caption(
-        f"Backtest universe: {', '.join(BACKTEST_SYMBOLS)} | Lookback: ~2 years of daily candles per symbol"
+        f"Backtest universe: {', '.join(BACKTEST_SYMBOLS)} | Lookback: ~3 years of daily candles per symbol"
     )
     with st.spinner("Running historical backtest..."):
         backtest_trades = run_strategy_backtest(
             tuple(BACKTEST_SYMBOLS),
-            period="2y",
+            period="3y",
             interval="1d",
             strategy_params_json=json.dumps(champion_params, sort_keys=True),
         )
