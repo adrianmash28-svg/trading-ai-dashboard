@@ -997,7 +997,7 @@ total_pnl = round(float(performance["pnl"].sum()), 2)
 
 page = st.sidebar.radio(
     "Navigate",
-    ["Command Center", "Dashboard", "Performance", "Setups", "Live Signals", "Paper Trades", "MashGPT", "Live Market"],
+    ["Command Center", "Dashboard", "Performance", "Setups", "Live Signals", "Paper Trades", "MashGPT", "Live Market", "About"],
 )
 
 st.sidebar.markdown("---")
@@ -1318,6 +1318,31 @@ elif page == "Performance":
             width="stretch",
             height=340,
         )
+
+elif page == "About":
+    render_page_header(
+        "About Mash Terminal",
+        "A focused trading workspace built for research, signal review, and simulated execution.",
+        "Product Overview",
+    )
+
+    st.markdown(
+        """
+        Mash Terminal is designed to bring market scanning, setup review, paper execution, and trader-facing intelligence into one streamlined environment. Instead of splitting the workflow across disconnected tools, the platform combines live signal discovery, trade tracking, analytics, and AI-assisted commentary inside a single interface built to feel more like a professional trading product than a collection of utilities.
+
+        At its core, the goal of Mash Terminal is simple: help users move from observation to decision with greater clarity. The platform continuously watches a defined symbol list, evaluates market structure, momentum, relative volume, and reward-to-risk characteristics, and surfaces the strongest long or short ideas in a format that is easier to scan quickly. Rather than forcing users to interpret raw outputs alone, the app organizes those signals into ranked views, top-setup callouts, and cleaner dashboards that make quality differences more obvious.
+
+        The scanning layer is paired with a simulated execution workflow through paper trading. When a trade is opened, the app records the setup, tracks price against its stop and profit targets, and moves that trade through its lifecycle as market conditions change. Closed trades feed directly into the performance views, allowing the platform to function not only as a scanner, but also as a lightweight trade journal for reviewing outcomes, equity growth, and win-loss behavior over time.
+
+        MashGPT extends that workflow by adding an intelligence layer on top of the platform data. It can interpret the strongest current setup, explain why a signal may or may not be compelling, frame trade risk, and respond to broader market questions using the same context the rest of the application is displaying. The goal is not to replace trader judgment, but to make the surrounding analysis faster, more structured, and easier to act on.
+
+        The Live Market view supports that decision process by giving users a cleaner way to monitor a symbol in real time. It combines a live chart, quick symbol switching, and current market context so the active name can be watched more closely once a setup becomes interesting. In practice, this makes the app useful both for discovering opportunities and for staying focused on the few symbols that matter most in the moment.
+
+        Mash Terminal also supports two operating styles. In Manual mode, the user stays in control of which setups become paper trades, typically through the explicit trade actions on the setup views. In Auto mode, the platform can log qualifying signals into paper trades automatically using the same underlying rules and tracking system. This allows the product to serve both discretionary review workflows and more systematic simulated monitoring.
+
+        The platform is intended for research, analysis, and simulated trading. It is built to help users evaluate setups, understand trade structure, and review performance in a more disciplined way, without presenting itself as a guarantee of outcomes or a substitute for independent judgment. In that sense, Mash Terminal is best understood as a decision-support product: a professional-feeling workspace for scanning markets, organizing information, and practicing execution with greater structure.
+        """
+    )
 
 elif page == "Live Signals":
     render_page_header(
