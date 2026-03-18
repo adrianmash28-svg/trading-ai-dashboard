@@ -2,8 +2,10 @@ import os
 import smtplib
 import time
 import json
-from datetime import datetime
+import hashlib
+from datetime import datetime, timedelta
 from email.message import EmailMessage
+from zoneinfo import ZoneInfo
 
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -41,6 +43,7 @@ PAPER_TRADES_FILE = "paper_trades.csv"
 DEFAULT_SYMBOLS = ["META", "NVDA", "AAPL", "MSFT"]
 BACKTEST_SYMBOLS = ["SPY", "QQQ", "NVDA", "TSLA", "AAPL", "MSFT"]
 STRATEGY_REGISTRY_FILE = "strategy_registry.json"
+ALGO_UPDATE_STATE_FILE = "algo_update_state.json"
 STARTING_EQUITY = 10000.0
 RISK_PER_TRADE = 0.01
 APPROVED_EMA_SHORT = [10, 12, 20]
@@ -59,6 +62,7 @@ APPROVED_STRUCTURE_WEIGHTS = [12, 18, 24]
 APPROVED_RR_WEIGHTS = [10, 20, 24]
 MIN_PROMOTION_TRADES = 20
 MAX_DRAWDOWN_DEGRADATION = 0.10
+APP_TIMEZONE = ZoneInfo("America/Los_Angeles")
 
 
 def get_openai_client():
@@ -163,8 +167,99 @@ def save_strategy_registry(registry):
         json.dump(registry, f, indent=2)
 
 
+def default_algo_update_state():
+    return {
+        "last_sent_at": "",
+        "last_schedule_slot": "",
+        "last_strategy_signature": "",
+        "last_strategy_signature_hash": "",
+        "last_message": "",
+        "last_pnl": 0.0,
+        "last_win_rate": 0.0,
+    }
+
+
+def ensure_algo_update_state():
+    if not os.path.exists(ALGO_UPDATE_STATE_FILE):
+        with open(ALGO_UPDATE_STATE_FILE, "w", encoding="utf-8") as f:
+            json.dump(default_algo_update_state(), f, indent=2)
+        return
+
+    try:
+        with open(ALGO_UPDATE_STATE_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if "last_schedule_slot" not in data:
+            raise ValueError("Missing algo update fields")
+    except Exception:
+        with open(ALGO_UPDATE_STATE_FILE, "w", encoding="utf-8") as f:
+            json.dump(default_algo_update_state(), f, indent=2)
+
+
+def load_algo_update_state():
+    ensure_algo_update_state()
+    with open(ALGO_UPDATE_STATE_FILE, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def save_algo_update_state(state):
+    with open(ALGO_UPDATE_STATE_FILE, "w", encoding="utf-8") as f:
+        json.dump(state, f, indent=2)
+
+
 def strategy_to_label(strategy):
     return f"{strategy['id']} (v{strategy['version']})"
+
+
+def build_strategy_signature(strategy):
+    signature_payload = {
+        "strategy_id": strategy.get("id", ""),
+        "version": strategy.get("version", ""),
+        "parameters": sanitize_strategy_parameters(strategy.get("parameters", {})),
+        "filters": {
+            "market_bias_filter": True,
+            "partial_take_profit": True,
+            "breakeven_after_tp1": True,
+            "risk_model": "1pct_account_risk",
+        },
+    }
+    signature_text = json.dumps(signature_payload, sort_keys=True)
+    signature_hash = hashlib.sha256(signature_text.encode("utf-8")).hexdigest()[:12]
+    return signature_text, signature_hash
+
+
+def scheduled_algo_hours_for_day(dt_local: datetime):
+    if dt_local.weekday() <= 4:
+        return [8, 12, 16]
+    return [12, 16, 20]
+
+
+def get_latest_schedule_slot(dt_local: datetime):
+    hours = scheduled_algo_hours_for_day(dt_local)
+    slots = [
+        dt_local.replace(hour=hour, minute=0, second=0, microsecond=0)
+        for hour in hours
+    ]
+    eligible = [slot for slot in slots if slot <= dt_local]
+    if eligible:
+        return eligible[-1]
+
+    previous_day = dt_local - timedelta(days=1)
+    prev_hours = scheduled_algo_hours_for_day(previous_day)
+    return previous_day.replace(hour=prev_hours[-1], minute=0, second=0, microsecond=0)
+
+
+def get_next_schedule_slot(dt_local: datetime):
+    for day_offset in range(0, 8):
+        candidate_day = dt_local + timedelta(days=day_offset)
+        hours = scheduled_algo_hours_for_day(candidate_day)
+        slots = [
+            candidate_day.replace(hour=hour, minute=0, second=0, microsecond=0)
+            for hour in hours
+        ]
+        future_slots = [slot for slot in slots if slot > dt_local]
+        if future_slots:
+            return future_slots[0]
+    return None
 
 
 def generate_strategy_candidates(base_params):
@@ -905,6 +1000,72 @@ def rollback_champion(registry):
     return registry, True
 
 
+def get_current_algorithm_summary(registry):
+    champion = registry["champion"]
+    champion_summary = champion.get("results_summary", {})
+    if champion_summary and champion_summary.get("num_trades", 0) > 0:
+        return champion_summary
+
+    _, champion_summary, _ = run_validation_split(BACKTEST_SYMBOLS, champion["parameters"])
+    registry["champion"]["results_summary"] = champion_summary
+    save_strategy_registry(registry)
+    return champion_summary
+
+
+def build_algo_update_message(summary, changed):
+    return f"Algo Update: P&L ${summary.get('total_pnl', 0.0):.2f} | Win {summary.get('win_rate', 0.0):.1f}% | Changed: {'Yes' if changed else 'No'}"
+
+
+def maybe_send_algorithm_status_update(registry):
+    now_local = datetime.now(APP_TIMEZONE)
+    state = load_algo_update_state()
+    current_signature, current_signature_hash = build_strategy_signature(registry["champion"])
+    summary = get_current_algorithm_summary(registry)
+    latest_slot = get_latest_schedule_slot(now_local)
+    latest_slot_key = latest_slot.isoformat()
+
+    if state.get("last_schedule_slot") == latest_slot_key:
+        return {
+            "sent": False,
+            "state": state,
+            "next_slot": get_next_schedule_slot(now_local),
+            "summary": summary,
+            "signature_hash": current_signature_hash,
+        }
+
+    changed = bool(state.get("last_strategy_signature_hash")) and state.get("last_strategy_signature_hash") != current_signature_hash
+    message = build_algo_update_message(summary, changed)
+    send_ok, send_error = send_sms_alert(message)
+
+    if send_ok:
+        state.update(
+            {
+                "last_sent_at": now_local.isoformat(),
+                "last_schedule_slot": latest_slot_key,
+                "last_strategy_signature": current_signature,
+                "last_strategy_signature_hash": current_signature_hash,
+                "last_message": message,
+                "last_pnl": summary.get("total_pnl", 0.0),
+                "last_win_rate": summary.get("win_rate", 0.0),
+            }
+        )
+        save_algo_update_state(state)
+    elif not state.get("last_strategy_signature_hash"):
+        state["last_strategy_signature"] = current_signature
+        state["last_strategy_signature_hash"] = current_signature_hash
+        save_algo_update_state(state)
+
+    return {
+        "sent": send_ok,
+        "error": send_error if not send_ok else "",
+        "state": state,
+        "next_slot": get_next_schedule_slot(now_local),
+        "summary": summary,
+        "signature_hash": current_signature_hash,
+        "changed": changed,
+    }
+
+
 def log_active_signals(signals: pd.DataFrame, paper: pd.DataFrame):
     if signals.empty:
         return paper, 0
@@ -1510,6 +1671,7 @@ st.markdown(
 symbols = DEFAULT_SYMBOLS
 paper = load_paper_trades()
 strategy_registry = load_strategy_registry()
+algo_update_info = maybe_send_algorithm_status_update(strategy_registry)
 if "trading_mode" not in st.session_state:
     st.session_state.trading_mode = "Manual"
 
@@ -1702,6 +1864,18 @@ if page == "Command Center":
                 st.markdown(f"- {item}")
         else:
             st.caption("No recent activity yet.")
+
+        st.markdown("### Algo Status")
+        algo_state = algo_update_info.get("state", {})
+        next_slot = algo_update_info.get("next_slot")
+        st.caption(f"Last update sent: {algo_state.get('last_sent_at', '') or 'Not yet sent'}")
+        st.caption(f"Strategy signature: {algo_update_info.get('signature_hash', 'n/a')}")
+        st.caption(
+            "Next scheduled update: "
+            + (next_slot.strftime("%Y-%m-%d %I:%M %p %Z") if next_slot else "Unavailable")
+        )
+        if algo_state.get("last_message"):
+            st.info(algo_state["last_message"])
 
     st.markdown("### Performance Snapshot")
     chart_left, chart_right = st.columns(2)
