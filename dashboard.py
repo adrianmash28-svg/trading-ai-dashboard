@@ -1013,10 +1013,6 @@ def get_current_algorithm_summary(registry):
 
 
 def build_algo_update_message(summary, changed):
-    return f"Algo Update: P&L ${summary.get('total_pnl', 0.0):.2f} | Win {summary.get('win_rate', 0.0):.1f}% | Changed: {'Yes' if changed else 'No'}"
-
-
-def build_sample_algo_update_message(summary, changed):
     pnl_value = float(summary.get("total_pnl", 245.30))
     win_rate_value = float(summary.get("win_rate", 58.2))
     trades_value = int(summary.get("num_trades", 42))
@@ -1894,7 +1890,7 @@ if page == "Command Center":
         if algo_state.get("last_message"):
             st.info(algo_state["last_message"])
         if st.button("Send Sample Algo Update", key="send-sample-algo-update", use_container_width=True):
-            sample_message = build_sample_algo_update_message(
+            sample_message = build_algo_update_message(
                 algo_update_info.get("summary", {}),
                 algo_update_info.get("changed", False),
             )
