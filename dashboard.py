@@ -64,6 +64,7 @@ MIN_PROMOTION_TRADES = 30
 MAX_DRAWDOWN_DEGRADATION = 0.10
 APP_TIMEZONE = ZoneInfo("America/Los_Angeles")
 RESEARCH_LOOP_HOURS = 4
+MAX_ONLINE_SCORE_ADJUSTMENT = 6
 
 
 def get_openai_client():
@@ -440,9 +441,15 @@ def ensure_paper_trades_file():
         "shares",
         "risk_pct",
         "account_balance",
+        "base_score",
         "score",
         "reason",
         "signal",
+        "sentiment_score",
+        "macro_regime",
+        "event_caution",
+        "online_score_adjustment",
+        "news_affected",
         "status",
         "result",
         "pnl",
@@ -539,6 +546,89 @@ def get_market_bias(df: pd.DataFrame) -> str:
     return "neutral"
 
 
+@st.cache_data(ttl=900)
+def get_symbol_news_context(symbol: str):
+    try:
+        news_items = yf.Ticker(symbol).news or []
+    except Exception:
+        return {
+            "sentiment_score": 0.0,
+            "event_caution": False,
+            "event_caution_label": "None",
+            "news_adjustment": 0,
+            "news_affected": False,
+        }
+
+    positive_terms = ["beat", "surge", "growth", "upside", "bullish", "strong", "expands", "record", "gain"]
+    negative_terms = ["miss", "drop", "cut", "lawsuit", "downgrade", "weak", "bearish", "loss", "fall"]
+    caution_terms = ["earnings", "fomc", "fed", "cpi", "inflation", "jobs report", "guidance", "sec", "investigation"]
+
+    sentiment_points = 0
+    caution_hits = 0
+    for item in news_items[:8]:
+        text = f"{item.get('title', '')} {item.get('summary', '')}".lower()
+        sentiment_points += sum(term in text for term in positive_terms)
+        sentiment_points -= sum(term in text for term in negative_terms)
+        caution_hits += sum(term in text for term in caution_terms)
+
+    sentiment_score = max(min(sentiment_points / 6.0, 1.0), -1.0)
+    event_caution = caution_hits > 0
+    news_adjustment = 0
+    if sentiment_score >= 0.35:
+        news_adjustment = 2
+    elif sentiment_score <= -0.35:
+        news_adjustment = -2
+    if event_caution:
+        news_adjustment -= 2
+
+    return {
+        "sentiment_score": round(sentiment_score, 2),
+        "event_caution": event_caution,
+        "event_caution_label": "High" if event_caution else "None",
+        "news_adjustment": int(news_adjustment),
+        "news_affected": bool(news_adjustment or event_caution),
+    }
+
+
+@st.cache_data(ttl=900)
+def get_macro_regime_context():
+    try:
+        spy = fetch_history("SPY", period="6mo", interval="1d")
+        qqq = fetch_history("QQQ", period="6mo", interval="1d")
+        iwm = fetch_history("IWM", period="6mo", interval="1d")
+        vix = fetch_history("^VIX", period="6mo", interval="1d")
+    except Exception:
+        return {"macro_regime": "neutral", "macro_adjustment_long": 0, "macro_adjustment_short": 0}
+
+    if spy.empty or qqq.empty or iwm.empty:
+        return {"macro_regime": "neutral", "macro_adjustment_long": 0, "macro_adjustment_short": 0}
+
+    def above_ema50(df: pd.DataFrame) -> bool:
+        if df.empty or len(df) < 60:
+            return False
+        ema50 = df["Close"].ewm(span=50, adjust=False).mean()
+        return float(df["Close"].iloc[-1]) > float(ema50.iloc[-1])
+
+    breadth_score = sum([above_ema50(spy), above_ema50(qqq), above_ema50(iwm)])
+    vix_last = float(vix["Close"].iloc[-1]) if not vix.empty else 20.0
+
+    if breadth_score >= 2 and vix_last < 20:
+        regime = "risk_on"
+        long_adj, short_adj = 2, -2
+    elif breadth_score <= 1 and vix_last > 24:
+        regime = "risk_off"
+        long_adj, short_adj = -2, 2
+    else:
+        regime = "neutral"
+        long_adj, short_adj = 0, 0
+
+    return {
+        "macro_regime": regime,
+        "macro_adjustment_long": long_adj,
+        "macro_adjustment_short": short_adj,
+    }
+
+
 def build_signal_snapshot(
     df: pd.DataFrame,
     symbol: str,
@@ -550,6 +640,8 @@ def build_signal_snapshot(
         return None
 
     params = sanitize_strategy_parameters(strategy_params)
+    news_context = get_symbol_news_context(symbol)
+    macro_context = get_macro_regime_context()
     work_df = df.copy()
     work_df["ema_short"] = work_df["Close"].ewm(span=params["ema_short_len"], adjust=False).mean()
     work_df["ema_long"] = work_df["Close"].ewm(span=params["ema_long_len"], adjust=False).mean()
@@ -669,7 +761,7 @@ def build_signal_snapshot(
 
     if long_score >= short_score and long_score >= params["score_threshold"] and trend_up and rel_vol >= params["rel_vol_min"] and rsi14 > params["rsi_long_min"] and long_rr >= 2.0 and confirmed_breakout and allow_long:
         signal = "LONG SETUP"
-        score = long_score
+        base_score = long_score
         risk = long_risk * params["stop_multiplier"]
         stop_loss = round(long_stop_base, 4)
         tp1 = round(close_price + max(risk * params["tp1_multiplier"], recent_range * 0.2), 4)
@@ -677,7 +769,7 @@ def build_signal_snapshot(
         reason = long_reason
     elif short_score > long_score and short_score >= params["score_threshold"] and trend_down and rel_vol >= params["rel_vol_min"] and rsi14 < params["rsi_short_max"] and short_rr >= 2.0 and confirmed_breakdown and allow_short:
         signal = "SHORT SETUP"
-        score = short_score
+        base_score = short_score
         risk = short_risk * params["stop_multiplier"]
         stop_loss = round(short_stop_base, 4)
         tp1 = round(close_price - max(risk * params["tp1_multiplier"], recent_range * 0.2), 4)
@@ -685,12 +777,21 @@ def build_signal_snapshot(
         reason = short_reason
     else:
         signal = "NO SIGNAL"
-        score = max(long_score, short_score)
+        base_score = max(long_score, short_score)
         risk = long_risk if long_score >= short_score else short_risk
         stop_loss = round(close_price + short_risk, 4)
         tp1 = round(close_price - max(short_risk * 1.5, recent_range * 0.2), 4)
         tp2 = round(close_price - max(short_risk * 2.3, recent_range * 0.35), 4)
         reason = long_reason if long_score >= short_score else short_reason
+
+    if signal == "LONG SETUP":
+        online_adjustment = news_context["news_adjustment"] + macro_context["macro_adjustment_long"]
+    elif signal == "SHORT SETUP":
+        online_adjustment = news_context["news_adjustment"] + macro_context["macro_adjustment_short"]
+    else:
+        online_adjustment = 0
+    online_adjustment = max(min(online_adjustment, MAX_ONLINE_SCORE_ADJUSTMENT), -MAX_ONLINE_SCORE_ADJUSTMENT)
+    score = int(max(0, min(100, base_score + online_adjustment)))
 
     risk_fraction = get_risk_fraction(score)
     risk_budget = max(float(account_equity) * risk_fraction, 0.0)
@@ -701,6 +802,7 @@ def build_signal_snapshot(
         "timestamp": snapshot_timestamp,
         "timeframe": timeframe,
         "close": round(close_price, 2),
+        "base_score": int(base_score),
         "score": score,
         "entry": round(close_price, 4),
         "stop_loss": stop_loss,
@@ -711,6 +813,11 @@ def build_signal_snapshot(
         "account_balance": round(float(account_equity), 2),
         "reason": reason,
         "signal": signal,
+        "sentiment_score": news_context["sentiment_score"],
+        "macro_regime": macro_context["macro_regime"],
+        "event_caution": news_context["event_caution_label"],
+        "online_score_adjustment": int(online_adjustment),
+        "news_affected": "Yes" if news_context["news_affected"] else "No",
         "rel_vol": round(rel_vol, 2),
         "change_pct": round(change_pct, 2),
     }
@@ -1312,9 +1419,15 @@ def log_active_signals(signals: pd.DataFrame, paper: pd.DataFrame):
             "shares": row["shares"],
             "risk_pct": row.get("risk_pct", RISK_PER_TRADE * 100),
             "account_balance": row.get("account_balance", STARTING_EQUITY),
+            "base_score": row.get("base_score", row["score"]),
             "score": row["score"],
             "reason": row.get("reason", ""),
             "signal": row["signal"],
+            "sentiment_score": row.get("sentiment_score", 0.0),
+            "macro_regime": row.get("macro_regime", "neutral"),
+            "event_caution": row.get("event_caution", "None"),
+            "online_score_adjustment": row.get("online_score_adjustment", 0),
+            "news_affected": row.get("news_affected", "No"),
             "status": "OPEN",
             "result": "",
             "pnl": "",
@@ -1445,9 +1558,15 @@ def add_paper_trade_from_setup(setup_row, paper_df: pd.DataFrame):
         "shares": setup_row["shares"],
         "risk_pct": setup_row.get("risk_pct", RISK_PER_TRADE * 100),
         "account_balance": setup_row.get("account_balance", STARTING_EQUITY),
+        "base_score": setup_row.get("base_score", setup_row["score"]),
         "score": setup_row["score"],
         "reason": str(setup_row.get("reason", "")),
         "signal": setup_row["signal"],
+        "sentiment_score": setup_row.get("sentiment_score", 0.0),
+        "macro_regime": setup_row.get("macro_regime", "neutral"),
+        "event_caution": setup_row.get("event_caution", "None"),
+        "online_score_adjustment": setup_row.get("online_score_adjustment", 0),
+        "news_affected": setup_row.get("news_affected", "No"),
         "status": "OPEN",
         "result": "",
         "pnl": "",
@@ -1545,6 +1664,12 @@ def render_trade_insights_section(trade_log: pd.DataFrame):
             "timeframe",
             "signal",
             "reason",
+            "sentiment_score",
+            "macro_regime",
+            "event_caution",
+            "online_score_adjustment",
+            "news_affected",
+            "base_score",
             "score",
             "result",
             "status",
@@ -2345,6 +2470,12 @@ if page == "Home":
             bottom_metrics[1].metric("TP2", f'{float(setup["take_profit_2"]):.4f}')
             bottom_metrics[2].metric("Change %", f'{float(setup["change_pct"]):.2f}%')
             bottom_metrics[3].metric("Signal", str(setup["signal"]))
+            st.caption(
+                f"Context: sentiment {float(setup.get('sentiment_score', 0.0)):+.2f} | "
+                f"macro {str(setup.get('macro_regime', 'neutral'))} | "
+                f"caution {str(setup.get('event_caution', 'None'))} | "
+                f"online adj {int(pd.to_numeric(setup.get('online_score_adjustment', 0), errors='coerce') or 0):+d}"
+            )
 
             open_symbols = {str(trade.get("symbol", "")) for trade in st.session_state.open_trades}
             if str(setup["symbol"]) in open_symbols:
@@ -2365,9 +2496,15 @@ if page == "Home":
                             "shares": setup["shares"],
                             "risk_pct": setup.get("risk_pct", RISK_PER_TRADE * 100),
                             "account_balance": setup.get("account_balance", current_account_balance),
+                            "base_score": setup.get("base_score", setup["score"]),
                             "score": setup["score"],
                             "reason": str(setup.get("reason", "")),
                             "signal": str(setup["signal"]),
+                            "sentiment_score": setup.get("sentiment_score", 0.0),
+                            "macro_regime": setup.get("macro_regime", "neutral"),
+                            "event_caution": setup.get("event_caution", "None"),
+                            "online_score_adjustment": setup.get("online_score_adjustment", 0),
+                            "news_affected": setup.get("news_affected", "No"),
                             "status": "OPEN",
                             "result": "",
                         }
@@ -2381,7 +2518,7 @@ if page == "Home":
     if open_trades.empty:
         st.caption("No open paper trades.")
     else:
-        open_summary = open_trades[["symbol", "signal", "entry", "stop_loss", "take_profit_1", "take_profit_2"]].copy()
+        open_summary = open_trades[["symbol", "signal", "entry", "stop_loss", "take_profit_1", "take_profit_2", "sentiment_score", "macro_regime", "event_caution", "online_score_adjustment"]].copy()
         st.dataframe(open_summary, width="stretch", height=220)
 
     st.markdown("### Algo Status")
@@ -2722,6 +2859,8 @@ elif page == "Strategy Lab":
             {"setting": "EMA Short / Long", "value": f"{champion_params.get('ema_short_len', '')} / {champion_params.get('ema_long_len', '')}"},
             {"setting": "Risk / Reward Threshold", "value": ">= 2.0"},
             {"setting": "Stop Model", "value": "Recent swing structure"},
+            {"setting": "Online Context Layer", "value": "Enabled, capped confidence adjustment only"},
+            {"setting": "Current Macro Regime", "value": get_macro_regime_context().get("macro_regime", "neutral")},
         ]
     )
     st.dataframe(settings_rows, width="stretch", height=280)
@@ -2909,9 +3048,15 @@ elif page == "Trades":
                         "shares": setup["shares"],
                         "risk_pct": setup.get("risk_pct", RISK_PER_TRADE * 100),
                         "account_balance": setup.get("account_balance", current_account_balance),
+                        "base_score": setup.get("base_score", setup["score"]),
                         "score": setup["score"],
                         "reason": str(setup.get("reason", "")),
                         "signal": str(setup["signal"]),
+                        "sentiment_score": setup.get("sentiment_score", 0.0),
+                        "macro_regime": setup.get("macro_regime", "neutral"),
+                        "event_caution": setup.get("event_caution", "None"),
+                        "online_score_adjustment": setup.get("online_score_adjustment", 0),
+                        "news_affected": setup.get("news_affected", "No"),
                         "status": "OPEN",
                         "result": "",
                     }
@@ -3190,9 +3335,15 @@ elif page == "Setups":
                         "shares": setup["shares"],
                         "risk_pct": setup.get("risk_pct", RISK_PER_TRADE * 100),
                         "account_balance": setup.get("account_balance", current_account_balance),
+                        "base_score": setup.get("base_score", setup["score"]),
                         "score": setup["score"],
                         "reason": str(setup.get("reason", "")),
                         "signal": str(setup["signal"]),
+                        "sentiment_score": setup.get("sentiment_score", 0.0),
+                        "macro_regime": setup.get("macro_regime", "neutral"),
+                        "event_caution": setup.get("event_caution", "None"),
+                        "online_score_adjustment": setup.get("online_score_adjustment", 0),
+                        "news_affected": setup.get("news_affected", "No"),
                         "status": "OPEN",
                         "result": "",
                     }
