@@ -1,6 +1,7 @@
 import os
 import smtplib
 import time
+import json
 from datetime import datetime
 from email.message import EmailMessage
 
@@ -39,8 +40,25 @@ VERIZON_SMS_GATEWAY = "3109911161@vtext.com"
 PAPER_TRADES_FILE = "paper_trades.csv"
 DEFAULT_SYMBOLS = ["META", "NVDA", "AAPL", "MSFT"]
 BACKTEST_SYMBOLS = ["SPY", "QQQ", "NVDA", "TSLA", "AAPL", "MSFT"]
+STRATEGY_REGISTRY_FILE = "strategy_registry.json"
 STARTING_EQUITY = 10000.0
 RISK_PER_TRADE = 0.01
+APPROVED_EMA_SHORT = [10, 12, 20]
+APPROVED_EMA_LONG = [34, 50, 60]
+APPROVED_SCORE_THRESHOLDS = [60, 65, 70]
+APPROVED_RSI_LONG = [55, 58, 60]
+APPROVED_RSI_SHORT = [45, 42, 40]
+APPROVED_REL_VOL = [1.5, 1.6, 1.8]
+APPROVED_STOP_MULTIPLIERS = [1.0, 1.1, 1.2]
+APPROVED_TP1_MULTIPLIERS = [1.3, 1.5, 1.7]
+APPROVED_TP2_MULTIPLIERS = [2.0, 2.3, 2.6]
+APPROVED_TREND_WEIGHTS = [24, 30, 34]
+APPROVED_MOMENTUM_WEIGHTS = [14, 18, 22]
+APPROVED_VOLUME_WEIGHTS = [10, 12, 16]
+APPROVED_STRUCTURE_WEIGHTS = [12, 18, 24]
+APPROVED_RR_WEIGHTS = [10, 20, 24]
+MIN_PROMOTION_TRADES = 20
+MAX_DRAWDOWN_DEGRADATION = 0.10
 
 
 def get_openai_client():
@@ -53,6 +71,128 @@ def get_openai_client():
 
 
 client = get_openai_client()
+
+
+def default_strategy_parameters():
+    return {
+        "score_threshold": 60,
+        "rsi_long_min": 55,
+        "rsi_short_max": 45,
+        "rel_vol_min": 1.5,
+        "ema_short_len": 20,
+        "ema_long_len": 50,
+        "stop_multiplier": 1.0,
+        "tp1_multiplier": 1.5,
+        "tp2_multiplier": 2.3,
+        "trend_weight": 30,
+        "momentum_weight": 18,
+        "volume_weight": 12,
+        "structure_weight": 18,
+        "rr_weight": 20,
+    }
+
+
+def sanitize_strategy_parameters(params):
+    defaults = default_strategy_parameters()
+    merged = {**defaults, **(params or {})}
+    merged["score_threshold"] = int(merged["score_threshold"]) if int(merged["score_threshold"]) in APPROVED_SCORE_THRESHOLDS else defaults["score_threshold"]
+    merged["rsi_long_min"] = int(merged["rsi_long_min"]) if int(merged["rsi_long_min"]) in APPROVED_RSI_LONG else defaults["rsi_long_min"]
+    merged["rsi_short_max"] = int(merged["rsi_short_max"]) if int(merged["rsi_short_max"]) in APPROVED_RSI_SHORT else defaults["rsi_short_max"]
+    merged["rel_vol_min"] = float(merged["rel_vol_min"]) if float(merged["rel_vol_min"]) in APPROVED_REL_VOL else defaults["rel_vol_min"]
+    merged["ema_short_len"] = int(merged["ema_short_len"]) if int(merged["ema_short_len"]) in APPROVED_EMA_SHORT else defaults["ema_short_len"]
+    merged["ema_long_len"] = int(merged["ema_long_len"]) if int(merged["ema_long_len"]) in APPROVED_EMA_LONG else defaults["ema_long_len"]
+    merged["stop_multiplier"] = float(merged["stop_multiplier"]) if float(merged["stop_multiplier"]) in APPROVED_STOP_MULTIPLIERS else defaults["stop_multiplier"]
+    merged["tp1_multiplier"] = float(merged["tp1_multiplier"]) if float(merged["tp1_multiplier"]) in APPROVED_TP1_MULTIPLIERS else defaults["tp1_multiplier"]
+    merged["tp2_multiplier"] = float(merged["tp2_multiplier"]) if float(merged["tp2_multiplier"]) in APPROVED_TP2_MULTIPLIERS else defaults["tp2_multiplier"]
+    merged["trend_weight"] = int(merged["trend_weight"]) if int(merged["trend_weight"]) in APPROVED_TREND_WEIGHTS else defaults["trend_weight"]
+    merged["momentum_weight"] = int(merged["momentum_weight"]) if int(merged["momentum_weight"]) in APPROVED_MOMENTUM_WEIGHTS else defaults["momentum_weight"]
+    merged["volume_weight"] = int(merged["volume_weight"]) if int(merged["volume_weight"]) in APPROVED_VOLUME_WEIGHTS else defaults["volume_weight"]
+    merged["structure_weight"] = int(merged["structure_weight"]) if int(merged["structure_weight"]) in APPROVED_STRUCTURE_WEIGHTS else defaults["structure_weight"]
+    merged["rr_weight"] = int(merged["rr_weight"]) if int(merged["rr_weight"]) in APPROVED_RR_WEIGHTS else defaults["rr_weight"]
+    return merged
+
+
+def default_strategy_registry():
+    return {
+        "champion": {
+            "id": "champion-v1",
+            "version": 1,
+            "status": "champion",
+            "parameters": default_strategy_parameters(),
+            "results_summary": {},
+            "promotion_status": "Live champion",
+            "paper_probation_passed": True,
+            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        },
+        "previous_champion": None,
+        "challenger": None,
+        "experiments": [],
+        "experiment_index": 0,
+        "last_research_run": "",
+    }
+
+
+def ensure_strategy_registry():
+    if not os.path.exists(STRATEGY_REGISTRY_FILE):
+        with open(STRATEGY_REGISTRY_FILE, "w", encoding="utf-8") as f:
+            json.dump(default_strategy_registry(), f, indent=2)
+        return
+
+    try:
+        with open(STRATEGY_REGISTRY_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if "champion" not in data:
+            raise ValueError("Missing champion")
+    except Exception:
+        with open(STRATEGY_REGISTRY_FILE, "w", encoding="utf-8") as f:
+            json.dump(default_strategy_registry(), f, indent=2)
+
+
+def load_strategy_registry():
+    ensure_strategy_registry()
+    with open(STRATEGY_REGISTRY_FILE, "r", encoding="utf-8") as f:
+        registry = json.load(f)
+    registry["champion"]["parameters"] = sanitize_strategy_parameters(registry["champion"].get("parameters", {}))
+    if registry.get("challenger"):
+        registry["challenger"]["parameters"] = sanitize_strategy_parameters(registry["challenger"].get("parameters", {}))
+    return registry
+
+
+def save_strategy_registry(registry):
+    with open(STRATEGY_REGISTRY_FILE, "w", encoding="utf-8") as f:
+        json.dump(registry, f, indent=2)
+
+
+def strategy_to_label(strategy):
+    return f"{strategy['id']} (v{strategy['version']})"
+
+
+def generate_strategy_candidates(base_params):
+    base = sanitize_strategy_parameters(base_params)
+    candidate_specs = [
+        {"score_threshold": 65},
+        {"score_threshold": 70},
+        {"rel_vol_min": 1.6},
+        {"rel_vol_min": 1.8},
+        {"rsi_long_min": 58, "rsi_short_max": 42},
+        {"rsi_long_min": 60, "rsi_short_max": 40},
+        {"ema_short_len": 12, "ema_long_len": 50},
+        {"ema_short_len": 20, "ema_long_len": 60},
+        {"stop_multiplier": 1.1, "tp1_multiplier": 1.5, "tp2_multiplier": 2.3},
+        {"stop_multiplier": 1.0, "tp1_multiplier": 1.7, "tp2_multiplier": 2.6},
+        {"trend_weight": 34, "structure_weight": 24},
+        {"momentum_weight": 22, "volume_weight": 16, "rr_weight": 24},
+    ]
+    candidates = []
+    seen = set()
+    for spec in candidate_specs:
+        params = sanitize_strategy_parameters({**base, **spec})
+        key = json.dumps(params, sort_keys=True)
+        if key == json.dumps(base, sort_keys=True) or key in seen:
+            continue
+        seen.add(key)
+        candidates.append(params)
+    return candidates
 
 
 def send_sms_alert(message: str):
@@ -225,13 +365,20 @@ def get_market_bias(df: pd.DataFrame) -> str:
     return "neutral"
 
 
-def build_signal_snapshot(df: pd.DataFrame, symbol: str, market_bias: str = "neutral", account_equity: float = STARTING_EQUITY):
+def build_signal_snapshot(
+    df: pd.DataFrame,
+    symbol: str,
+    market_bias: str = "neutral",
+    account_equity: float = STARTING_EQUITY,
+    strategy_params=None,
+):
     if df.empty or len(df) < 60:
         return None
 
+    params = sanitize_strategy_parameters(strategy_params)
     work_df = df.copy()
-    work_df["ema20"] = work_df["Close"].ewm(span=20, adjust=False).mean()
-    work_df["ema50"] = work_df["Close"].ewm(span=50, adjust=False).mean()
+    work_df["ema_short"] = work_df["Close"].ewm(span=params["ema_short_len"], adjust=False).mean()
+    work_df["ema_long"] = work_df["Close"].ewm(span=params["ema_long_len"], adjust=False).mean()
     work_df["vol_avg20"] = work_df["Volume"].rolling(20).mean()
     work_df["rel_vol"] = work_df["Volume"] / work_df["vol_avg20"]
     delta = work_df["Close"].diff()
@@ -249,8 +396,8 @@ def build_signal_snapshot(df: pd.DataFrame, symbol: str, market_bias: str = "neu
         return None
 
     close_price = float(last["Close"])
-    ema20 = float(last["ema20"]) if pd.notna(last["ema20"]) else close_price
-    ema50 = float(last["ema50"]) if pd.notna(last["ema50"]) else close_price
+    ema_short = float(last["ema_short"]) if pd.notna(last["ema_short"]) else close_price
+    ema_long = float(last["ema_long"]) if pd.notna(last["ema_long"]) else close_price
     rel_vol = float(last["rel_vol"]) if pd.notna(last["rel_vol"]) else 0.0
     rsi14 = float(last["rsi14"]) if pd.notna(last["rsi14"]) else 50.0
     prev_rsi = float(prev["rsi14"]) if pd.notna(prev["rsi14"]) else rsi14
@@ -262,39 +409,39 @@ def build_signal_snapshot(df: pd.DataFrame, symbol: str, market_bias: str = "neu
     long_score = 0
     short_score = 0
 
-    trend_up = ema20 > ema50 and close_price > ema50
-    trend_down = ema20 < ema50 and close_price < ema50
+    trend_up = ema_short > ema_long and close_price > ema_long
+    trend_down = ema_short < ema_long and close_price < ema_long
     if trend_up:
-        long_score += 30
-    elif close_price > ema50:
+        long_score += params["trend_weight"]
+    elif close_price > ema_long:
         long_score += 10
     if trend_down:
-        short_score += 30
-    elif close_price < ema50:
+        short_score += params["trend_weight"]
+    elif close_price < ema_long:
         short_score += 10
 
-    if 55 <= rsi14 <= 72 and rsi14 >= prev_rsi:
-        long_score += 18
+    if params["rsi_long_min"] <= rsi14 <= 72 and rsi14 >= prev_rsi:
+        long_score += params["momentum_weight"]
     elif rsi14 > 72:
         long_score += 4
-    if 28 <= rsi14 <= 45 and rsi14 <= prev_rsi:
-        short_score += 18
+    if 28 <= rsi14 <= params["rsi_short_max"] and rsi14 <= prev_rsi:
+        short_score += params["momentum_weight"]
     elif rsi14 < 28:
         short_score += 4
 
     if rel_vol >= 1.8:
-        long_score += 20
-        short_score += 20
-    elif rel_vol >= 1.5:
-        long_score += 12
-        short_score += 12
+        long_score += params["volume_weight"] + 8
+        short_score += params["volume_weight"] + 8
+    elif rel_vol >= params["rel_vol_min"]:
+        long_score += params["volume_weight"]
+        short_score += params["volume_weight"]
 
     breakout_level = recent_resistance * 0.997
     breakdown_level = recent_support * 1.003
     if close_price >= breakout_level:
-        long_score += 18
+        long_score += params["structure_weight"]
     if close_price <= breakdown_level:
-        short_score += 18
+        short_score += params["structure_weight"]
 
     if change_pct >= 0.6:
         long_score += 10
@@ -315,31 +462,31 @@ def build_signal_snapshot(df: pd.DataFrame, symbol: str, market_bias: str = "neu
     short_rr = short_reward / short_risk if short_risk > 0 else 0.0
 
     if long_rr >= 2.2:
-        long_score += 20
+        long_score += params["rr_weight"]
     elif long_rr >= 1.7:
         long_score += 10
     if short_rr >= 2.2:
-        short_score += 20
+        short_score += params["rr_weight"]
     elif short_rr >= 1.7:
         short_score += 10
 
     allow_long = market_bias == "bullish"
     allow_short = market_bias == "bearish"
 
-    if long_score >= short_score and long_score >= 60 and trend_up and rel_vol >= 1.5 and rsi14 > 55 and long_rr >= 1.7 and allow_long:
+    if long_score >= short_score and long_score >= params["score_threshold"] and trend_up and rel_vol >= params["rel_vol_min"] and rsi14 > params["rsi_long_min"] and long_rr >= 1.7 and allow_long:
         signal = "LONG SETUP"
         score = long_score
-        risk = long_risk
+        risk = long_risk * params["stop_multiplier"]
         stop_loss = round(close_price - risk, 4)
-        tp1 = round(close_price + max(risk * 1.5, recent_range * 0.2), 4)
-        tp2 = round(close_price + max(risk * 2.3, recent_range * 0.35), 4)
-    elif short_score > long_score and short_score >= 60 and trend_down and rel_vol >= 1.5 and rsi14 < 45 and short_rr >= 1.7 and allow_short:
+        tp1 = round(close_price + max(risk * params["tp1_multiplier"], recent_range * 0.2), 4)
+        tp2 = round(close_price + max(risk * params["tp2_multiplier"], recent_range * 0.35), 4)
+    elif short_score > long_score and short_score >= params["score_threshold"] and trend_down and rel_vol >= params["rel_vol_min"] and rsi14 < params["rsi_short_max"] and short_rr >= 1.7 and allow_short:
         signal = "SHORT SETUP"
         score = short_score
-        risk = short_risk
+        risk = short_risk * params["stop_multiplier"]
         stop_loss = round(close_price + risk, 4)
-        tp1 = round(close_price - max(risk * 1.5, recent_range * 0.2), 4)
-        tp2 = round(close_price - max(risk * 2.3, recent_range * 0.35), 4)
+        tp1 = round(close_price - max(risk * params["tp1_multiplier"], recent_range * 0.2), 4)
+        tp2 = round(close_price - max(risk * params["tp2_multiplier"], recent_range * 0.35), 4)
     else:
         signal = "NO SIGNAL"
         score = max(long_score, short_score)
@@ -370,10 +517,18 @@ def calc_live_signals(symbols):
     rows = []
     market_history = fetch_history("SPY", period="5d", interval="15m")
     market_bias = get_market_bias(market_history)
+    strategy_registry = load_strategy_registry()
+    champion_params = strategy_registry["champion"]["parameters"]
 
     for symbol in symbols:
         df = fetch_history(symbol, period="5d", interval="15m")
-        signal_snapshot = build_signal_snapshot(df, symbol, market_bias=market_bias, account_equity=STARTING_EQUITY)
+        signal_snapshot = build_signal_snapshot(
+            df,
+            symbol,
+            market_bias=market_bias,
+            account_equity=STARTING_EQUITY,
+            strategy_params=champion_params,
+        )
         if signal_snapshot:
             rows.append(signal_snapshot)
 
@@ -384,10 +539,11 @@ def calc_live_signals(symbols):
 
 
 @st.cache_data(ttl=900)
-def run_strategy_backtest(symbols, period: str = "2y", interval: str = "1d") -> pd.DataFrame:
+def run_strategy_backtest(symbols, period: str = "2y", interval: str = "1d", strategy_params_json: str = "") -> pd.DataFrame:
     results = []
     current_equity = STARTING_EQUITY
     market_history = fetch_history("SPY", period=period, interval=interval)
+    strategy_params = sanitize_strategy_parameters(json.loads(strategy_params_json) if strategy_params_json else {})
 
     for symbol in symbols:
         history = fetch_history(symbol, period=period, interval=interval)
@@ -525,6 +681,7 @@ def run_strategy_backtest(symbols, period: str = "2y", interval: str = "1d") -> 
                 symbol,
                 market_bias=market_bias,
                 account_equity=current_equity,
+                strategy_params=strategy_params,
             )
             if not signal_snapshot or signal_snapshot["signal"] == "NO SIGNAL" or signal_snapshot["shares"] <= 0:
                 continue
@@ -620,6 +777,132 @@ def summarize_backtest_results(backtest_trades: pd.DataFrame):
         "max_drawdown": round(float(backtest_curve["drawdown"].min()), 2) if not backtest_curve.empty else 0.0,
         "num_trades": int(len(trades)),
     }
+
+
+def compare_strategy_results(champion_summary, challenger_summary):
+    drawdown_limit = abs(float(champion_summary.get("max_drawdown", 0.0))) * (1 + MAX_DRAWDOWN_DEGRADATION)
+    eligible = (
+        challenger_summary.get("num_trades", 0) >= MIN_PROMOTION_TRADES
+        and challenger_summary.get("win_rate", 0.0) >= champion_summary.get("win_rate", 0.0)
+        and challenger_summary.get("total_pnl", 0.0) >= champion_summary.get("total_pnl", 0.0)
+        and abs(float(challenger_summary.get("max_drawdown", 0.0))) <= max(drawdown_limit, 1.0)
+        and challenger_summary.get("out_of_sample_pnl", 0.0) >= champion_summary.get("out_of_sample_pnl", 0.0)
+        and challenger_summary.get("out_of_sample_win_rate", 0.0) >= champion_summary.get("out_of_sample_win_rate", 0.0)
+    )
+    return eligible
+
+
+def run_validation_split(symbols, params):
+    all_trades = run_strategy_backtest(
+        tuple(symbols),
+        period="2y",
+        interval="1d",
+        strategy_params_json=json.dumps(sanitize_strategy_parameters(params), sort_keys=True),
+    )
+    if all_trades.empty:
+        return all_trades, summarize_backtest_results(all_trades), summarize_backtest_results(all_trades)
+
+    split_index = max(int(len(all_trades) * 0.7), 1)
+    in_sample = all_trades.iloc[:split_index].copy()
+    out_sample = all_trades.iloc[split_index:].copy()
+    in_summary = summarize_backtest_results(in_sample)
+    out_summary = summarize_backtest_results(out_sample)
+    combined = summarize_backtest_results(all_trades)
+    combined["out_of_sample_pnl"] = out_summary["total_pnl"]
+    combined["out_of_sample_win_rate"] = out_summary["win_rate"]
+    combined["in_sample_pnl"] = in_summary["total_pnl"]
+    combined["in_sample_win_rate"] = in_summary["win_rate"]
+    return all_trades, combined, out_summary
+
+
+def build_strategy_record(strategy_id, version, status, params, summary, promotion_status, paper_probation_passed=False):
+    return {
+        "id": strategy_id,
+        "version": version,
+        "status": status,
+        "parameters": sanitize_strategy_parameters(params),
+        "results_summary": summary,
+        "promotion_status": promotion_status,
+        "paper_probation_passed": paper_probation_passed,
+        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+
+
+def advance_strategy_research(registry):
+    base_params = registry["champion"]["parameters"]
+    candidates = generate_strategy_candidates(base_params)
+    if not candidates:
+        return registry
+
+    existing_keys = {
+        json.dumps(exp["parameters"], sort_keys=True)
+        for exp in registry.get("experiments", [])
+    }
+    next_candidate = None
+    for params in candidates:
+        key = json.dumps(params, sort_keys=True)
+        if key not in existing_keys:
+            next_candidate = params
+            break
+
+    if next_candidate is None:
+        registry["last_research_run"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        return registry
+
+    _, challenger_summary, _ = run_validation_split(BACKTEST_SYMBOLS, next_candidate)
+    champion_summary = registry["champion"].get("results_summary", {})
+    eligible = compare_strategy_results(champion_summary, challenger_summary) if champion_summary else False
+    experiment_version = len(registry.get("experiments", [])) + 1
+    experiment_record = build_strategy_record(
+        f"challenger-v{experiment_version}",
+        experiment_version,
+        "challenger",
+        next_candidate,
+        challenger_summary,
+        "Eligible for paper probation" if eligible else "Rejected by promotion gates",
+        paper_probation_passed=False,
+    )
+    registry.setdefault("experiments", []).append(experiment_record)
+    registry["challenger"] = experiment_record if eligible else registry.get("challenger")
+    registry["last_research_run"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    save_strategy_registry(registry)
+    return registry
+
+
+def promote_challenger(registry):
+    challenger = registry.get("challenger")
+    if not challenger or not challenger.get("paper_probation_passed"):
+        return registry, False
+
+    champion_summary = registry["champion"].get("results_summary", {})
+    if not compare_strategy_results(champion_summary, challenger.get("results_summary", {})):
+        return registry, False
+
+    registry["previous_champion"] = registry["champion"]
+    registry["champion"] = {
+        **challenger,
+        "status": "champion",
+        "promotion_status": "Promoted to champion",
+    }
+    registry["challenger"] = None
+    save_strategy_registry(registry)
+    return registry, True
+
+
+def rollback_champion(registry):
+    previous = registry.get("previous_champion")
+    if not previous:
+        return registry, False
+
+    current = registry["champion"]
+    registry["champion"] = {
+        **previous,
+        "status": "champion",
+        "promotion_status": "Restored after rollback",
+    }
+    registry["previous_champion"] = current
+    save_strategy_registry(registry)
+    return registry, True
 
 
 def log_active_signals(signals: pd.DataFrame, paper: pd.DataFrame):
@@ -1226,6 +1509,7 @@ st.markdown(
 
 symbols = DEFAULT_SYMBOLS
 paper = load_paper_trades()
+strategy_registry = load_strategy_registry()
 if "trading_mode" not in st.session_state:
     st.session_state.trading_mode = "Manual"
 
@@ -1267,7 +1551,7 @@ total_pnl = round(float(performance["pnl"].sum()), 2)
 
 page = st.sidebar.radio(
     "Workspace",
-    ["Command Center", "Trades", "Performance", "Live Market", "MashGPT", "About"],
+    ["Command Center", "Trades", "Performance", "Strategy Lab", "Live Market", "MashGPT", "About"],
 )
 
 st.sidebar.markdown("---")
@@ -1541,13 +1825,23 @@ elif page == "Performance":
         "Strategy Lab",
     )
 
+    champion_params = strategy_registry["champion"]["parameters"]
     st.caption(
         f"Backtest universe: {', '.join(BACKTEST_SYMBOLS)} | Lookback: ~2 years of daily candles per symbol"
     )
     with st.spinner("Running historical backtest..."):
-        backtest_trades = run_strategy_backtest(tuple(BACKTEST_SYMBOLS), period="2y", interval="1d")
+        backtest_trades = run_strategy_backtest(
+            tuple(BACKTEST_SYMBOLS),
+            period="2y",
+            interval="1d",
+            strategy_params_json=json.dumps(champion_params, sort_keys=True),
+        )
     backtest_summary = summarize_backtest_results(backtest_trades)
     backtest_curve = create_paper_performance_curve(backtest_trades)
+    backtest_summary["out_of_sample_pnl"] = backtest_summary["total_pnl"]
+    backtest_summary["out_of_sample_win_rate"] = backtest_summary["win_rate"]
+    strategy_registry["champion"]["results_summary"] = backtest_summary
+    save_strategy_registry(strategy_registry)
 
     if backtest_trades.empty:
         st.markdown(
@@ -1625,6 +1919,130 @@ elif page == "Performance":
             width="stretch",
             height=340,
         )
+
+elif page == "Strategy Lab":
+    render_page_header(
+        "Strategy Lab",
+        "A conservative champion-vs-challenger workflow that tests only approved parameter variations before any strategy can be promoted.",
+        "Research Engine",
+    )
+
+    if not strategy_registry["champion"].get("results_summary"):
+        _, champion_summary, _ = run_validation_split(BACKTEST_SYMBOLS, strategy_registry["champion"]["parameters"])
+        strategy_registry["champion"]["results_summary"] = champion_summary
+        save_strategy_registry(strategy_registry)
+
+    with st.spinner("Research engine evaluating an approved challenger..."):
+        strategy_registry = advance_strategy_research(load_strategy_registry())
+
+    champion = strategy_registry["champion"]
+    challenger = strategy_registry.get("challenger")
+    champion_summary = champion.get("results_summary", {})
+
+    if challenger and st.button("Mark Challenger Probation Passed", use_container_width=True):
+        strategy_registry["challenger"]["paper_probation_passed"] = True
+        strategy_registry["challenger"]["promotion_status"] = "Paper probation passed"
+        save_strategy_registry(strategy_registry)
+        st.rerun()
+
+    action_left, action_right = st.columns(2)
+    with action_left:
+        if challenger and challenger.get("paper_probation_passed") and st.button("Promote Challenger", use_container_width=True):
+            strategy_registry, promoted = promote_challenger(strategy_registry)
+            if promoted:
+                st.success("Challenger promoted to champion")
+                st.rerun()
+            st.info("Promotion gates are not fully satisfied yet.")
+    with action_right:
+        if strategy_registry.get("previous_champion") and st.button("Rollback to Previous Champion", use_container_width=True):
+            strategy_registry, rolled_back = rollback_champion(strategy_registry)
+            if rolled_back:
+                st.success("Previous champion restored")
+                st.rerun()
+
+    champ_col, chall_col = st.columns(2)
+    with champ_col:
+        st.markdown("### Current Champion")
+        st.markdown(
+            f"""
+            <div class="top-trade-banner" style="border-color: rgba(56, 189, 248, 0.55);">
+                <div class="top-trade-kicker">Live Strategy</div>
+                <div class="top-trade-value">{strategy_to_label(champion)}</div>
+                <div class="app-subtitle" style="margin-top: 0.5rem;">{champion.get("promotion_status", "Live champion")}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.json(champion["parameters"], expanded=False)
+
+    with chall_col:
+        st.markdown("### Active Challenger")
+        if challenger:
+            st.markdown(
+                f"""
+                <div class="top-trade-banner" style="border-color: rgba(251, 191, 36, 0.55);">
+                    <div class="top-trade-kicker">Experimental Candidate</div>
+                    <div class="top-trade-value">{strategy_to_label(challenger)}</div>
+                    <div class="app-subtitle" style="margin-top: 0.5rem;">{challenger.get("promotion_status", "Under review")}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            st.json(challenger["parameters"], expanded=False)
+        else:
+            st.info("No active challenger has cleared the research gates yet.")
+
+    st.markdown("### Promotion Status")
+    if challenger:
+        challenger_summary = challenger.get("results_summary", {})
+        promotion_checks = pd.DataFrame(
+            [
+                {"check": "Minimum trade count", "status": "Pass" if challenger_summary.get("num_trades", 0) >= MIN_PROMOTION_TRADES else "Fail"},
+                {"check": "Win rate >= champion", "status": "Pass" if challenger_summary.get("win_rate", 0.0) >= champion_summary.get("win_rate", 0.0) else "Fail"},
+                {"check": "Net P&L >= champion", "status": "Pass" if challenger_summary.get("total_pnl", 0.0) >= champion_summary.get("total_pnl", 0.0) else "Fail"},
+                {"check": "Drawdown not materially worse", "status": "Pass" if abs(float(challenger_summary.get("max_drawdown", 0.0))) <= max(abs(float(champion_summary.get("max_drawdown", 0.0))) * (1 + MAX_DRAWDOWN_DEGRADATION), 1.0) else "Fail"},
+                {"check": "Out-of-sample validation", "status": "Pass" if challenger_summary.get("out_of_sample_pnl", 0.0) >= champion_summary.get("out_of_sample_pnl", 0.0) and challenger_summary.get("out_of_sample_win_rate", 0.0) >= champion_summary.get("out_of_sample_win_rate", 0.0) else "Fail"},
+                {"check": "Paper probation", "status": "Pass" if challenger.get("paper_probation_passed") else "Pending"},
+            ]
+        )
+        st.dataframe(promotion_checks, width="stretch", height=245)
+
+        compare_left, compare_right = st.columns(2)
+        with compare_left:
+            st.markdown("#### Champion Metrics")
+            c1, c2, c3 = st.columns(3)
+            c1.metric("P&L", f"${champion_summary.get('total_pnl', 0.0):,.2f}")
+            c2.metric("Win Rate", f"{champion_summary.get('win_rate', 0.0):.2f}%")
+            c3.metric("Max DD", f"${champion_summary.get('max_drawdown', 0.0):,.2f}")
+        with compare_right:
+            st.markdown("#### Challenger Metrics")
+            d1, d2, d3 = st.columns(3)
+            d1.metric("P&L", f"${challenger_summary.get('total_pnl', 0.0):,.2f}")
+            d2.metric("Win Rate", f"{challenger_summary.get('win_rate', 0.0):.2f}%")
+            d3.metric("Max DD", f"${challenger_summary.get('max_drawdown', 0.0):,.2f}")
+    else:
+        st.caption("The research engine is cycling through approved variations and will surface a challenger only if it clears the initial evaluation gates.")
+
+    st.markdown("### Latest Experiments")
+    experiments = strategy_registry.get("experiments", [])
+    if experiments:
+        experiment_rows = []
+        for exp in reversed(experiments[-8:]):
+            summary = exp.get("results_summary", {})
+            experiment_rows.append(
+                {
+                    "strategy": strategy_to_label(exp),
+                    "status": exp.get("promotion_status", ""),
+                    "trades": summary.get("num_trades", 0),
+                    "pnl": summary.get("total_pnl", 0.0),
+                    "win_rate": summary.get("win_rate", 0.0),
+                    "max_drawdown": summary.get("max_drawdown", 0.0),
+                    "out_of_sample_pnl": summary.get("out_of_sample_pnl", 0.0),
+                }
+            )
+        st.dataframe(pd.DataFrame(experiment_rows), width="stretch", height=280)
+    else:
+        st.caption("No experiments logged yet.")
 
 elif page == "About":
     render_page_header(
