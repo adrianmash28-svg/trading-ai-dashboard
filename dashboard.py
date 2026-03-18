@@ -323,17 +323,19 @@ def update_open_trades(paper: pd.DataFrame):
     return paper, closed_now
 
 
-def create_backtest_placeholder():
-    x = list(range(1, 61))
-    pnl_steps = [
-        120, -40, 90, 60, -35, 80, 50, -25, 110, 70,
-        -30, 65, 85, -45, 95, 40, -20, 105, 60, -35,
-        75, 55, -25, 90, 65, -30, 80, 70, -40, 95,
-        50, -20, 85, 60, -35, 100, 55, -25, 70, 65,
-        -30, 110, 50, -20, 75, 60, -35, 90, 55, -25,
-        80, 65, -30, 95, 50, -20, 70, 60, -30, 85,
-    ]
-    trades = pd.DataFrame({"trade_num": x, "pnl": pnl_steps})
+def create_paper_performance_curve(closed_trades_df: pd.DataFrame):
+    if closed_trades_df is None or closed_trades_df.empty:
+        trades = pd.DataFrame({"trade_num": [0], "pnl": [0.0]})
+        trades["equity"] = STARTING_EQUITY
+        trades["peak"] = STARTING_EQUITY
+        trades["drawdown"] = 0.0
+        return trades
+
+    trades = closed_trades_df.copy()
+    trades["pnl"] = pd.to_numeric(trades["pnl"], errors="coerce").fillna(0.0)
+    trades["time"] = pd.to_datetime(trades["time"], errors="coerce")
+    trades = trades.sort_values(["time", "symbol"], na_position="last").reset_index(drop=True)
+    trades["trade_num"] = range(1, len(trades) + 1)
     trades["equity"] = STARTING_EQUITY + trades["pnl"].cumsum()
     trades["peak"] = trades["equity"].cummax()
     trades["drawdown"] = trades["equity"] - trades["peak"]
@@ -491,9 +493,9 @@ open_trades = paper[paper["status"].astype(str) == "OPEN"].copy()
 closed_trades = paper[paper["status"].astype(str) == "CLOSED"].copy()
 paper_pnl = pd.to_numeric(closed_trades["pnl"], errors="coerce").fillna(0).sum()
 
-backtest = create_backtest_placeholder()
-win_rate = round((backtest["pnl"] > 0).mean() * 100, 2)
-total_pnl = round(float(backtest["pnl"].sum()), 2)
+performance = create_paper_performance_curve(closed_trades)
+win_rate = round((performance["pnl"] > 0).mean() * 100, 2) if not closed_trades.empty else 0.0
+total_pnl = round(float(performance["pnl"].sum()), 2)
 
 
 st.sidebar.title("📊 Navigation")
@@ -513,8 +515,8 @@ st.title("Mash Trading Dashboard")
 st.caption(f"Last refreshed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
 m1, m2, m3, m4 = st.columns(4)
-m1.metric("Backtest Win Rate %", win_rate)
-m2.metric("Backtest P&L", f"${total_pnl}")
+m1.metric("Paper Win Rate %", win_rate)
+m2.metric("Paper P&L", f"${total_pnl}")
 m3.metric("Open Paper Trades", int(len(open_trades)))
 m4.metric("Live Setups", int((signals["signal"] == "SHORT SETUP").sum()) if not signals.empty else 0)
 
@@ -562,8 +564,8 @@ if page == "Dashboard":
     with c1:
         st.subheader("Equity Curve")
         fig, ax = plt.subplots(figsize=(10, 4.5))
-        ax.plot(backtest["trade_num"], backtest["equity"], linewidth=2.7)
-        ax.fill_between(backtest["trade_num"], backtest["equity"], backtest["equity"].min(), alpha=0.08)
+        ax.plot(performance["trade_num"], performance["equity"], linewidth=2.7)
+        ax.fill_between(performance["trade_num"], performance["equity"], performance["equity"].min(), alpha=0.08)
         ax.set_title("Strategy Equity Curve", fontsize=15, pad=12)
         ax.set_xlabel("Trade Number")
         ax.set_ylabel("Account Value")
@@ -575,8 +577,8 @@ if page == "Dashboard":
     with c2:
         st.subheader("Drawdown")
         fig2, ax2 = plt.subplots(figsize=(10, 4.5))
-        ax2.plot(backtest["trade_num"], backtest["drawdown"], linewidth=2.7)
-        ax2.fill_between(backtest["trade_num"], backtest["drawdown"], 0, alpha=0.12)
+        ax2.plot(performance["trade_num"], performance["drawdown"], linewidth=2.7)
+        ax2.fill_between(performance["trade_num"], performance["drawdown"], 0, alpha=0.12)
         ax2.set_title("Strategy Drawdown", fontsize=15, pad=12)
         ax2.set_xlabel("Trade Number")
         ax2.set_ylabel("Drawdown ($)")
