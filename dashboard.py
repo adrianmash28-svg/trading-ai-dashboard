@@ -54,7 +54,7 @@ client = get_openai_client()
 
 def send_sms_alert(message: str):
     if not all([TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER, ALERT_TO_NUMBER]):
-        return False
+        return False, "Missing Twilio credentials"
     try:
         response = requests.post(
             f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_ACCOUNT_SID}/Messages.json",
@@ -66,9 +66,16 @@ def send_sms_alert(message: str):
             },
             timeout=10,
         )
-        return response.ok
-    except Exception:
-        return False
+        if response.ok:
+            return True, ""
+        try:
+            error_data = response.json()
+            error_message = error_data.get("message") or error_data.get("detail") or response.text
+        except Exception:
+            error_message = response.text or f"HTTP {response.status_code}"
+        return False, str(error_message).strip()
+    except Exception as e:
+        return False, str(e).strip()
 
 def get_polygon_last_trade(symbol: str):
     if not POLYGON_API_KEY:
@@ -789,10 +796,15 @@ st.sidebar.markdown(
     unsafe_allow_html=True,
 )
 if st.sidebar.button("Send Test SMS", use_container_width=True):
-    if send_sms_alert("✅ MashGPT test SMS is working."):
+    sms_ok, sms_error = send_sms_alert("✅ MashGPT test SMS is working.")
+    if sms_ok:
         st.sidebar.success("Test SMS sent")
     else:
-        st.sidebar.error("Test SMS could not be sent")
+        st.sidebar.error(f"Test SMS could not be sent{f': {sms_error}' if sms_error else ''}")
+    st.sidebar.caption(f"TWILIO_ACCOUNT_SID set: {'Yes' if bool(TWILIO_ACCOUNT_SID) else 'No'}")
+    st.sidebar.caption(f"TWILIO_AUTH_TOKEN set: {'Yes' if bool(TWILIO_AUTH_TOKEN) else 'No'}")
+    st.sidebar.caption(f"TWILIO_FROM_NUMBER: {TWILIO_FROM_NUMBER or '(missing)'}")
+    st.sidebar.caption(f"ALERT_TO_NUMBER: {ALERT_TO_NUMBER or '(missing)'}")
 
 
 st.title("Mash Trading Dashboard")
