@@ -78,6 +78,22 @@ def get_openai_client():
 client = get_openai_client()
 
 
+def get_account_balance_from_trades(closed_trades_df: pd.DataFrame) -> float:
+    if closed_trades_df is None or closed_trades_df.empty:
+        return STARTING_EQUITY
+    realized_pnl = pd.to_numeric(closed_trades_df["pnl"], errors="coerce").fillna(0.0).sum()
+    return max(STARTING_EQUITY + float(realized_pnl), STARTING_EQUITY * 0.25)
+
+
+def get_risk_fraction(score: float) -> float:
+    score_value = float(pd.to_numeric(score, errors="coerce") or 0.0)
+    if score_value >= 90:
+        return 0.02
+    if score_value >= 80:
+        return 0.015
+    return RISK_PER_TRADE
+
+
 def default_strategy_parameters():
     return {
         "score_threshold": 70,
@@ -422,6 +438,8 @@ def ensure_paper_trades_file():
         "take_profit_1",
         "take_profit_2",
         "shares",
+        "risk_pct",
+        "account_balance",
         "score",
         "reason",
         "signal",
@@ -674,7 +692,8 @@ def build_signal_snapshot(
         tp2 = round(close_price - max(short_risk * 2.3, recent_range * 0.35), 4)
         reason = long_reason if long_score >= short_score else short_reason
 
-    risk_budget = max(float(account_equity) * RISK_PER_TRADE, 0.0)
+    risk_fraction = get_risk_fraction(score)
+    risk_budget = max(float(account_equity) * risk_fraction, 0.0)
     shares = int(risk_budget / risk) if risk > 0 else 0
     return {
         "symbol": symbol,
@@ -688,6 +707,8 @@ def build_signal_snapshot(
         "take_profit_1": tp1,
         "take_profit_2": tp2,
         "shares": shares,
+        "risk_pct": round(risk_fraction * 100, 2),
+        "account_balance": round(float(account_equity), 2),
         "reason": reason,
         "signal": signal,
         "rel_vol": round(rel_vol, 2),
@@ -701,6 +722,9 @@ def calc_live_signals(symbols):
     market_bias = get_market_bias(market_history)
     strategy_registry = load_strategy_registry()
     champion_params = strategy_registry["champion"]["parameters"]
+    closed_trade_history = load_paper_trades()
+    closed_trade_history = closed_trade_history[closed_trade_history["status"].astype(str).str.startswith("CLOSED")].copy()
+    current_account_balance = get_account_balance_from_trades(closed_trade_history)
 
     for symbol in symbols:
         df = fetch_history(symbol, period="5d", interval="15m")
@@ -708,7 +732,7 @@ def calc_live_signals(symbols):
             df,
             symbol,
             market_bias=market_bias,
-            account_equity=STARTING_EQUITY,
+            account_equity=current_account_balance,
             strategy_params=champion_params,
         )
         if signal_snapshot:
@@ -1286,6 +1310,8 @@ def log_active_signals(signals: pd.DataFrame, paper: pd.DataFrame):
             "take_profit_1": row["take_profit_1"],
             "take_profit_2": row["take_profit_2"],
             "shares": row["shares"],
+            "risk_pct": row.get("risk_pct", RISK_PER_TRADE * 100),
+            "account_balance": row.get("account_balance", STARTING_EQUITY),
             "score": row["score"],
             "reason": row.get("reason", ""),
             "signal": row["signal"],
@@ -1417,6 +1443,8 @@ def add_paper_trade_from_setup(setup_row, paper_df: pd.DataFrame):
         "take_profit_1": setup_row["take_profit_1"],
         "take_profit_2": setup_row["take_profit_2"],
         "shares": setup_row["shares"],
+        "risk_pct": setup_row.get("risk_pct", RISK_PER_TRADE * 100),
+        "account_balance": setup_row.get("account_balance", STARTING_EQUITY),
         "score": setup_row["score"],
         "reason": str(setup_row.get("reason", "")),
         "signal": setup_row["signal"],
@@ -2136,8 +2164,10 @@ if not trade_log.empty and "result" in trade_log.columns:
         lambda status: "win" if "WIN" in status else "loss"
     )
 paper_pnl = pd.to_numeric(closed_trades["pnl"], errors="coerce").fillna(0).sum()
+current_account_balance = get_account_balance_from_trades(closed_trades)
 st.session_state.open_trades = open_trades.to_dict("records")
 st.session_state.trade_log = trade_log.to_dict("records")
+st.session_state.account_balance = current_account_balance
 
 performance = create_paper_performance_curve(closed_trades)
 win_rate = round((performance["pnl"] > 0).mean() * 100, 2) if not closed_trades.empty else 0.0
@@ -2333,6 +2363,8 @@ if page == "Home":
                             "take_profit_1": setup["take_profit_1"],
                             "take_profit_2": setup["take_profit_2"],
                             "shares": setup["shares"],
+                            "risk_pct": setup.get("risk_pct", RISK_PER_TRADE * 100),
+                            "account_balance": setup.get("account_balance", current_account_balance),
                             "score": setup["score"],
                             "reason": str(setup.get("reason", "")),
                             "signal": str(setup["signal"]),
@@ -2875,6 +2907,8 @@ elif page == "Trades":
                         "take_profit_1": setup["take_profit_1"],
                         "take_profit_2": setup["take_profit_2"],
                         "shares": setup["shares"],
+                        "risk_pct": setup.get("risk_pct", RISK_PER_TRADE * 100),
+                        "account_balance": setup.get("account_balance", current_account_balance),
                         "score": setup["score"],
                         "reason": str(setup.get("reason", "")),
                         "signal": str(setup["signal"]),
@@ -3154,6 +3188,8 @@ elif page == "Setups":
                         "take_profit_1": setup["take_profit_1"],
                         "take_profit_2": setup["take_profit_2"],
                         "shares": setup["shares"],
+                        "risk_pct": setup.get("risk_pct", RISK_PER_TRADE * 100),
+                        "account_balance": setup.get("account_balance", current_account_balance),
                         "score": setup["score"],
                         "reason": str(setup.get("reason", "")),
                         "signal": str(setup["signal"]),
