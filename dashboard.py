@@ -1506,6 +1506,68 @@ def render_trade_insights_section(trade_log: pd.DataFrame):
     )
 
 
+def build_live_trade_feed(paper_df: pd.DataFrame) -> pd.DataFrame:
+    if paper_df is None or paper_df.empty:
+        return pd.DataFrame(columns=["event_time", "event_text"])
+
+    feed_rows = []
+    for _, trade in paper_df.iterrows():
+        open_time = str(trade.get("timestamp") or trade.get("time") or "")
+        symbol = str(trade.get("symbol", ""))
+        signal = str(trade.get("signal", ""))
+        if open_time:
+            feed_rows.append(
+                {
+                    "event_time": pd.to_datetime(open_time, errors="coerce"),
+                    "event_text": f"🚀 OPENED {symbol} | {signal}",
+                }
+            )
+
+        close_time = str(trade.get("close_time", "") or "")
+        status = str(trade.get("status", ""))
+        exit_reason = str(trade.get("exit_reason", ""))
+        pnl = float(pd.to_numeric(trade.get("pnl"), errors="coerce") or 0.0)
+        if close_time and status.startswith("CLOSED"):
+            if "WIN" in status:
+                emoji = "✅"
+                label = "TP HIT"
+            else:
+                emoji = "❌"
+                label = "SL HIT"
+            feed_rows.append(
+                {
+                    "event_time": pd.to_datetime(close_time, errors="coerce"),
+                    "event_text": f"{emoji} {label} {symbol} | {exit_reason} | ${pnl:,.2f}",
+                }
+            )
+
+    if not feed_rows:
+        return pd.DataFrame(columns=["event_time", "event_text"])
+
+    feed = pd.DataFrame(feed_rows)
+    return feed.sort_values("event_time", ascending=False, na_position="last").reset_index(drop=True)
+
+
+def build_daily_pnl(trade_log: pd.DataFrame) -> pd.DataFrame:
+    if trade_log is None or trade_log.empty:
+        return pd.DataFrame(columns=["day", "pnl"])
+
+    pnl_log = trade_log.copy()
+    pnl_log["close_time"] = pd.to_datetime(pnl_log["close_time"], errors="coerce")
+    pnl_log["pnl"] = pd.to_numeric(pnl_log["pnl"], errors="coerce").fillna(0.0)
+    pnl_log = pnl_log.dropna(subset=["close_time"])
+    if pnl_log.empty:
+        return pd.DataFrame(columns=["day", "pnl"])
+
+    pnl_log["day"] = pnl_log["close_time"].dt.strftime("%Y-%m-%d")
+    return (
+        pnl_log.groupby("day", dropna=False)["pnl"]
+        .sum()
+        .reset_index()
+        .sort_values("day")
+    )
+
+
 def render_strategy_lab_section(strategy_registry):
     if not strategy_registry["champion"].get("results_summary"):
         _, champion_summary, _ = run_validation_split(BACKTEST_SYMBOLS, strategy_registry["champion"]["parameters"])
@@ -2056,7 +2118,7 @@ total_pnl = round(float(performance["pnl"].sum()), 2)
 
 page = st.sidebar.radio(
     "Workspace",
-    ["Home", "Performance", "Trade Insights", "Market", "MashGPT", "About"],
+    ["Home", "Money View", "Performance", "Trade Insights", "Market", "MashGPT", "About"],
 )
 
 st.sidebar.markdown("---")
@@ -2109,29 +2171,47 @@ st.markdown(
 
 if page == "Home":
     render_page_header(
-        "Home",
-        "A focused overview of performance, open risk, active opportunities, and algorithm status.",
+        "Profit Command Center",
+        "Stay focused on profit, trade status, and the next action that matters.",
         "Home",
     )
+    active_setup_count = int(signals["signal"].astype(str).isin(["LONG SETUP", "SHORT SETUP"]).sum()) if not signals.empty else 0
+    if len(open_trades) > 0:
+        current_status = "IN TRADE"
+    elif active_setup_count == 0:
+        current_status = "NO SETUPS"
+    else:
+        current_status = "RUNNING"
+
     st.markdown(
-        """
-        <div class="top-trade-banner" style="border-color: rgba(56, 189, 248, 0.42);">
-            <div class="top-trade-kicker">Primary Dashboard</div>
-            <div class="app-subtitle">Review active opportunities, monitor open risk, and check algorithm health in one concise workspace.</div>
+        f"""
+        <div class="top-trade-banner" style="border-color: rgba(34, 197, 94, 0.42);">
+            <div class="top-trade-kicker">Profit Command Center</div>
+            <div style="font-size: 2.35rem; font-weight: 800; color: #f8fafc; margin-bottom: 0.7rem;">
+                ${round(float(paper_pnl), 2):,.2f}
+            </div>
+            <div class="top-trade-grid" style="grid-template-columns: repeat(3, minmax(0, 1fr));">
+                <div class="top-trade-item">
+                    <div class="top-trade-label">Win Rate</div>
+                    <div class="top-trade-value">{win_rate:.2f}%</div>
+                </div>
+                <div class="top-trade-item">
+                    <div class="top-trade-label">Current Status</div>
+                    <div class="top-trade-value">{current_status}</div>
+                </div>
+                <div class="top-trade-item">
+                    <div class="top-trade-label">Mode</div>
+                    <div class="top-trade-value">{trading_mode.upper()}</div>
+                </div>
+            </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    cc1, cc2, cc3, cc4 = st.columns(4)
-    cc1.metric("P&L", f"${round(float(paper_pnl), 2):,.2f}")
-    cc2.metric("Win Rate", f"{win_rate:.2f}%")
-    cc3.metric("Open Trades", int(len(open_trades)))
-    cc4.metric("Active Setups", int(signals["signal"].astype(str).isin(["LONG SETUP", "SHORT SETUP"]).sum()) if not signals.empty else 0)
-
-    summary_left, summary_right = st.columns([1.2, 0.8])
+    summary_left, summary_right = st.columns([1.35, 0.65])
     with summary_left:
-        st.markdown("### Top Setup Right Now")
+        st.markdown("### Top Setup")
         if signals.empty:
             st.caption("No ranked setup is active at the moment.")
         else:
@@ -2165,25 +2245,21 @@ if page == "Home":
                 unsafe_allow_html=True,
             )
     with summary_right:
-        st.markdown("### Latest Activity")
-        st.metric("New This Refresh", new_logged)
-        st.metric("Closed This Refresh", newly_closed)
-        if closed_trades.empty:
-            st.caption("No closed trades recorded yet.")
+        st.markdown("### Live Trade Feed")
+        feed = build_live_trade_feed(paper)
+        if feed.empty:
+            st.caption("No trade events recorded yet.")
         else:
-            last_closed = closed_trades.iloc[-1]
-            st.caption(
-                "Last closed: "
-                f"{last_closed.get('symbol', 'N/A')} | "
-                f"{str(last_closed.get('status', ''))} | "
-                f"${float(pd.to_numeric(last_closed.get('pnl'), errors='coerce') or 0):,.2f}"
-            )
+            for _, event in feed.head(6).iterrows():
+                event_time = event["event_time"]
+                event_label = event_time.strftime("%b %d %I:%M %p") if pd.notna(event_time) else "Recent"
+                st.caption(f"{event_label}  {event['event_text']}")
 
     st.markdown("### Active Opportunities")
     if signals.empty:
         st.caption("No active opportunities right now.")
     else:
-        active_opportunities = signals.sort_values("score", ascending=False).head(3).reset_index(drop=True)
+        active_opportunities = signals.sort_values("score", ascending=False).head(2).reset_index(drop=True)
         for _, setup in active_opportunities.iterrows():
             score = int(setup["score"])
             setup_verdict = get_setup_verdict(score)
@@ -2271,6 +2347,49 @@ if page == "Home":
             st.success("Sample algo update sent")
         else:
             st.error(f"Sample algo update could not be sent{f': {sample_error}' if sample_error else ''}")
+
+elif page == "Money View":
+    render_page_header(
+        "Money View",
+        "Focus on equity growth, daily profit flow, and the trades that are moving the account.",
+        "Profit",
+    )
+    daily_pnl = build_daily_pnl(trade_log)
+    best_trade = float(pd.to_numeric(trade_log["pnl"], errors="coerce").max()) if not trade_log.empty else 0.0
+    worst_trade = float(pd.to_numeric(trade_log["pnl"], errors="coerce").min()) if not trade_log.empty else 0.0
+
+    mv1, mv2, mv3, mv4 = st.columns(4)
+    mv1.metric("Open Trades", int(len(open_trades)))
+    mv2.metric("Best Trade", f"${best_trade:,.2f}")
+    mv3.metric("Worst Trade", f"${worst_trade:,.2f}")
+    mv4.metric("Realized P&L", f"${float(paper_pnl):,.2f}")
+
+    money_left, money_right = st.columns(2)
+    with money_left:
+        fig_money, ax_money = plt.subplots(figsize=(10.5, 4.8), facecolor="#0f172a")
+        ax_money.plot(performance["trade_num"], performance["equity"], linewidth=2.8, color="#22c55e")
+        ax_money.fill_between(
+            performance["trade_num"],
+            performance["equity"],
+            performance["equity"].min(),
+            color="#22c55e",
+            alpha=0.12,
+        )
+        style_dashboard_chart(ax_money, "Equity Curve", "Trade Number", "Account Value")
+        fig_money.tight_layout(pad=1.2)
+        st.pyplot(fig_money)
+
+    with money_right:
+        if daily_pnl.empty:
+            st.caption("Daily P&L will appear after trades close on multiple dates.")
+        else:
+            fig_daily, ax_daily = plt.subplots(figsize=(10.5, 4.8), facecolor="#0f172a")
+            daily_colors = ["#22c55e" if pnl >= 0 else "#ef4444" for pnl in daily_pnl["pnl"]]
+            ax_daily.bar(daily_pnl["day"], daily_pnl["pnl"], color=daily_colors, width=0.6)
+            style_dashboard_chart(ax_daily, "Daily P&L", "Day", "P&L ($)")
+            plt.setp(ax_daily.get_xticklabels(), rotation=30, ha="right")
+            fig_daily.tight_layout(pad=1.2)
+            st.pyplot(fig_daily)
 
 elif page == "Dashboard":
     render_page_header(
@@ -2994,7 +3113,7 @@ elif page == "MashGPT":
 elif page == "Market":
     render_page_header(
         "Market",
-        "Monitor the watchlist, inspect a selected symbol, and open the chart only when you need more detail.",
+        "Monitor the watchlist and stay focused on the chart plus the few market numbers that matter.",
         "Watchlist",
     )
     st_autorefresh(interval=5000, key="live_market_refresh")
@@ -3006,7 +3125,6 @@ elif page == "Market":
     # default timeframe (TradingView will handle UI anyway)
     timeframe = "60"
 
-    st.caption(f"Watchlist: {', '.join(['NVDA', 'AAPL', 'TSLA', 'SPY'])}")
     st.session_state["live_market_symbol"] = selected_symbol
     quick1, quick2, quick3, quick4 = st.columns(4)
     if quick1.button("NVDA", use_container_width=True):
@@ -3133,12 +3251,11 @@ elif page == "Market":
         else:
             change_pct = None
 
-        s1, s2, s3, s4, s5 = st.columns(5)
+        s1, s2, s3, s4 = st.columns(4)
         s1.metric("Live Price", f"{latest_close:.2f}" if latest_close is not None else "N/A")
         s2.metric("Change %", f"{change_pct:.2f}%" if change_pct is not None else "N/A")
-        s3.metric("High", f"{high_val:.2f}" if high_val is not None else "N/A")
-        s4.metric("Low", f"{low_val:.2f}" if low_val is not None else "N/A")
-        s5.metric("Volume", f"{latest_volume:,}" if latest_volume is not None else "N/A")
+        s3.metric("Day Range", f"{low_val:.2f} - {high_val:.2f}" if low_val is not None and high_val is not None else "N/A")
+        s4.metric("Volume", f"{latest_volume:,}" if latest_volume is not None else "N/A")
 
         st.caption("Live price powered by Polygon")
 
@@ -3152,12 +3269,11 @@ elif page == "Market":
 
         stats_left, stats_center, stats_right = st.columns([0.04, 0.92, 0.04])
         with stats_center:
-            s1, s2, s3, s4, s5 = st.columns(5)
+            s1, s2, s3, s4 = st.columns(4)
             s1.metric("Last", f"{latest_close:.2f}")
             s2.metric("Change %", f"{change_pct:.2f}%")
-            s3.metric("High", f"{high_val:.2f}")
-            s4.metric("Low", f"{low_val:.2f}")
-            s5.metric("Volume", f"{latest_volume:,}")
+            s3.metric("Range", f"{low_val:.2f} - {high_val:.2f}")
+            s4.metric("Volume", f"{latest_volume:,}")
 
         st.caption("Fallback data from yfinance")
     else:
