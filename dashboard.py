@@ -639,11 +639,15 @@ elif page == "Live Market":
             selected_symbol,
             period="6mo" if timeframe in ["D", "W"] else "5d",
             interval="1d" if timeframe in ["D", "W"] else "15m",
-
-            polygon_trade = get_polygon_last_trade(selected_symbol)
-            polygon_prev = get_polygon_prev_day(selected_symbol)
-            market_status = get_polygon_market_status()
         )
+
+        polygon_trade = get_polygon_last_trade(selected_symbol)
+        polygon_prev = get_polygon_prev_day(selected_symbol)
+        market_status = get_polygon_market_status()
+
+        if market_status:
+            market_name = market_status.get("market", "unknown")
+            st.caption(f"Market status: {market_name}")
 
         if polygon_trade and polygon_prev:
             latest_close = float(polygon_trade["price"]) if polygon_trade.get("price") is not None else None
@@ -666,25 +670,25 @@ elif page == "Live Market":
 
             st.caption("Live price powered by Polygon")
 
-    elif not market_df.empty:
-        latest_close = float(market_df["Close"].iloc[-1])
-        first_close = float(market_df["Close"].iloc[0])
-        change_pct = ((latest_close - first_close) / first_close) * 100 if first_close != 0 else 0.0
-        latest_volume = int(market_df["Volume"].iloc[-1])
-        high_val = float(market_df["High"].max())
-        low_val = float(market_df["Low"].min())
+        elif not market_df.empty:
+            latest_close = float(market_df["Close"].iloc[-1])
+            first_close = float(market_df["Close"].iloc[0])
+            change_pct = ((latest_close - first_close) / first_close) * 100 if first_close != 0 else 0.0
+            latest_volume = int(market_df["Volume"].iloc[-1])
+            high_val = float(market_df["High"].max())
+            low_val = float(market_df["Low"].min())
 
-        s1, s2, s3, s4, s5 = st.columns(5)
-        s1.metric("Last", f"{latest_close:.2f}")
-        s2.metric("Change %", f"{change_pct:.2f}%")
-        s3.metric("High", f"{high_val:.2f}")
-        s4.metric("Low", f"{low_val:.2f}")
-        s5.metric("Volume", f"{latest_volume:,}")
+            s1, s2, s3, s4, s5 = st.columns(5)
+            s1.metric("Last", f"{latest_close:.2f}")
+            s2.metric("Change %", f"{change_pct:.2f}%")
+            s3.metric("High", f"{high_val:.2f}")
+            s4.metric("Low", f"{low_val:.2f}")
+            s5.metric("Volume", f"{latest_volume:,}")
 
-        st.caption("Fallback data from yfinance")
+            st.caption("Fallback data from yfinance")
 
-    else:
-        st.warning(f"No data found for {selected_symbol}")
+        else:
+            st.warning(f"No data found for {selected_symbol}")
 
         st.markdown("### Quick Picks")
         q1, q2 = st.columns(2)
@@ -707,13 +711,13 @@ elif page == "Live Market":
         st.markdown(f"### {selected_symbol} Chart")
 
         tradingview_html = f"""
-        <div id="tradingview_chart" style="width:100%; height:1300px;"></div>
+        <div id="tradingview_chart" style="width:100%; height:1000px;"></div>
 
         <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
         <script type="text/javascript">
         new TradingView.widget({{
             "width": "100%",
-            "height": 1300,
+            "height": 1000,
             "symbol": "{selected_symbol}",
             "interval": "{timeframe}",
             "timezone": "America/Los_Angeles",
@@ -732,7 +736,7 @@ elif page == "Live Market":
         </script>
         """
 
-        components.html(tradingview_html, height=1320)
+        components.html(tradingview_html, height=1020)
 
         if not market_df.empty:
             with st.expander("Show raw market data"):
