@@ -36,7 +36,7 @@ def get_secret(name: str, default: str = "") -> str:
 OPENAI_API_KEY = get_secret("OPENAI_API_KEY", "")
 EMAIL_SENDER = get_secret("EMAIL_SENDER", "")
 EMAIL_PASSWORD = get_secret("EMAIL_PASSWORD", "")
-POLYGON_API_KEY = get_secret("ypKE7G5kgwYcGEPApyKMWjpgp4JGpCTT", "")
+POLYGON_API_KEY = get_secret("POLYGON_API_KEY", "")
 VERIZON_SMS_GATEWAY = "3109911161@vtext.com"
 
 PAPER_TRADES_FILE = "paper_trades.csv"
