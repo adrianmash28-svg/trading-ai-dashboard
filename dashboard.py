@@ -936,6 +936,17 @@ def build_strategy_record(strategy_id, version, status, params, summary, promoti
     }
 
 
+def format_strategy_timestamp(value):
+    if not value:
+        return "Unknown"
+    parsed = pd.to_datetime(value, errors="coerce")
+    if pd.isna(parsed):
+        return "Unknown"
+    if getattr(parsed, "tzinfo", None) is not None:
+        parsed = parsed.tz_convert(APP_TIMEZONE)
+    return parsed.strftime("%b %d, %Y %-I:%M %p")
+
+
 def advance_strategy_research(registry):
     base_params = registry["champion"]["parameters"]
     candidates = generate_strategy_candidates(base_params)
@@ -2241,6 +2252,7 @@ elif page == "Strategy Lab":
             summary = exp.get("results_summary", {})
             experiment_rows.append(
                 {
+                    "changed_at": format_strategy_timestamp(exp.get("created_at", "")),
                     "strategy": strategy_to_label(exp),
                     "status": exp.get("promotion_status", ""),
                     "trades": summary.get("num_trades", 0),
