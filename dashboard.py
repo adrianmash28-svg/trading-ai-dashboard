@@ -601,10 +601,10 @@ elif page == "Live Market":
 
     watchlist = ["AAPL", "NVDA", "META", "MSFT", "TSLA", "AMZN", "SPY", "QQQ"]
 
-selected_symbol = st.session_state.get("live_market_symbol", "NVDA")
+    selected_symbol = st.session_state.get("live_market_symbol", "NVDA")
 
-# default timeframe (TradingView will handle UI anyway)
-timeframe = "60"
+    # default timeframe (TradingView will handle UI anyway)
+    timeframe = "60"
 
     st.session_state["live_market_symbol"] = selected_symbol
 
