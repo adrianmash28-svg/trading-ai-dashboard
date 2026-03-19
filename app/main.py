@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 
+from app.routes.strategy_lab import router as strategy_lab_router
 from app.routes.status import router as status_router
 
 
@@ -15,4 +16,4 @@ def health():
 
 
 app.include_router(status_router, prefix="/api")
-
+app.include_router(strategy_lab_router, prefix="/api")

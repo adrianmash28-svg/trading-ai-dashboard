@@ -190,11 +190,96 @@ def _experiments_tested_today(registry: dict) -> int:
     return total
 
 
-def get_api_status_snapshot():
+def _normalize_results_summary(summary: dict | None):
+    payload = summary if isinstance(summary, dict) else {}
+    return {
+        "total_pnl": round(float(payload.get("total_pnl", 0.0) or 0.0), 2),
+        "win_rate": round(float(payload.get("win_rate", 0.0) or 0.0), 2),
+        "max_drawdown": round(float(payload.get("max_drawdown", 0.0) or 0.0), 2),
+        "num_trades": int(payload.get("num_trades", 0) or 0),
+        "average_win": round(float(payload.get("average_win", 0.0) or 0.0), 2),
+        "average_loss": round(float(payload.get("average_loss", 0.0) or 0.0), 2),
+        "learning_score": round(float(payload.get("learning_score", 0.0) or 0.0), 2),
+    }
+
+
+def _normalize_strategy_snapshot(strategy: dict | None):
+    if not isinstance(strategy, dict):
+        return None
+    return {
+        "id": strategy.get("id", ""),
+        "version": strategy.get("version"),
+        "status": strategy.get("status", ""),
+        "promotion_status": strategy.get("promotion_status", ""),
+        "paper_probation_passed": bool(strategy.get("paper_probation_passed", False)),
+        "created_at": _format_timestamp(strategy.get("created_at", "")),
+        "last_tested_at": _format_timestamp(strategy.get("last_tested_at", "")),
+        "testing_status": strategy.get("testing_status", ""),
+        "latest_result_status": strategy.get("latest_result_status", ""),
+        "promotion_date": _format_timestamp(strategy.get("promotion_date", "")),
+        "parameters": strategy.get("parameters", {}) if isinstance(strategy.get("parameters"), dict) else {},
+        "results_summary": _normalize_results_summary(strategy.get("results_summary")),
+    }
+
+
+def _normalize_activity_entry(entry: dict | None):
+    payload = entry if isinstance(entry, dict) else {}
+    return {
+        "time": _format_timestamp(payload.get("time", "")),
+        "message": payload.get("message", ""),
+        "level": payload.get("level", "info"),
+    }
+
+
+def get_strategy_lab_summary_snapshot():
     registry = load_strategy_registry()
     algo_state = load_algo_update_state()
-    champion = registry.get("champion", {}) or {}
-    challenger = registry.get("challenger") or {}
+    return {
+        "current_champion": _normalize_strategy_snapshot(registry.get("champion")),
+        "current_challenger": _normalize_strategy_snapshot(registry.get("challenger")),
+        "research_worker_status": registry.get("research_worker_status", "offline"),
+        "research_worker_last_seen": _format_timestamp(registry.get("research_worker_last_seen", "")),
+        "last_activity_time": _format_timestamp(registry.get("last_activity_time", "")),
+        "last_research_run": _format_timestamp(registry.get("last_research_run", "")),
+        "last_experiment_started_at": _format_timestamp(registry.get("last_experiment_started_at", "")),
+        "last_experiment_finished_at": _format_timestamp(registry.get("last_experiment_finished_at", "")),
+        "last_challenger_result": registry.get("last_challenger_result", ""),
+        "last_rejection_reason": registry.get("last_rejection_reason", ""),
+        "last_promotion_time": _format_timestamp(registry.get("last_promotion_at", "")),
+        "last_update_sent": _format_timestamp(algo_state.get("last_sent_at", "")),
+        "experiments_tested_today": _experiments_tested_today(registry),
+        "total_experiments": len(registry.get("experiments", []) or []),
+    }
+
+
+def get_strategy_lab_activity_snapshot(limit: int = 25):
+    registry = load_strategy_registry()
+    activity = [_normalize_activity_entry(entry) for entry in registry.get("research_activity", []) or []]
+    activity = [entry for entry in activity if entry["time"] or entry["message"]]
+    activity.reverse()
+    return {
+        "research_worker_status": registry.get("research_worker_status", "offline"),
+        "last_activity_time": _format_timestamp(registry.get("last_activity_time", "")),
+        "count": min(len(activity), max(limit, 0)),
+        "items": activity[: max(limit, 0)],
+    }
+
+
+def get_strategy_lab_experiments_snapshot(limit: int = 50):
+    registry = load_strategy_registry()
+    experiments = [_normalize_strategy_snapshot(exp) for exp in registry.get("experiments", []) or []]
+    experiments = [exp for exp in experiments if exp]
+    experiments.sort(key=lambda exp: exp.get("created_at", ""), reverse=True)
+    return {
+        "total_experiments": len(experiments),
+        "items": experiments[: max(limit, 0)],
+    }
+
+
+def get_api_status_snapshot():
+    summary = get_strategy_lab_summary_snapshot()
+    champion = summary.get("current_champion") or {}
+    challenger = summary.get("current_challenger") or {}
     return {
         "app": "Mash Terminal",
         "status": "ready",
@@ -202,14 +287,14 @@ def get_api_status_snapshot():
         "current_champion_version": champion.get("version"),
         "current_champion_id": champion.get("id", ""),
         "current_challenger_version": challenger.get("version") if challenger else None,
-        "last_activity_time": _format_timestamp(registry.get("last_activity_time", "")),
-        "last_research_run": _format_timestamp(registry.get("last_research_run", "")),
-        "last_promotion_time": _format_timestamp(registry.get("last_promotion_at", "")),
-        "last_update_sent": _format_timestamp(algo_state.get("last_sent_at", "")),
-        "last_challenger_result": registry.get("last_challenger_result", ""),
-        "last_rejection_reason": registry.get("last_rejection_reason", ""),
-        "research_worker_status": registry.get("research_worker_status", "offline"),
-        "research_worker_last_seen": _format_timestamp(registry.get("research_worker_last_seen", "")),
-        "experiments_tested_today": _experiments_tested_today(registry),
-        "total_experiments": len(registry.get("experiments", []) or []),
+        "last_activity_time": summary.get("last_activity_time", ""),
+        "last_research_run": summary.get("last_research_run", ""),
+        "last_promotion_time": summary.get("last_promotion_time", ""),
+        "last_update_sent": summary.get("last_update_sent", ""),
+        "last_challenger_result": summary.get("last_challenger_result", ""),
+        "last_rejection_reason": summary.get("last_rejection_reason", ""),
+        "research_worker_status": summary.get("research_worker_status", "offline"),
+        "research_worker_last_seen": summary.get("research_worker_last_seen", ""),
+        "experiments_tested_today": summary.get("experiments_tested_today", 0),
+        "total_experiments": summary.get("total_experiments", 0),
     }
