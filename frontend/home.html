@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mash Terminal</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <div class="topbar-inner">
+        <a class="brand" href="/">
+          <span class="brand-mark">MT</span>
+          <span>
+            <div class="brand-title">Mash Terminal</div>
+            <div class="brand-subtitle">Research Console</div>
+          </span>
+        </a>
+        <nav class="nav">
+          <a class="nav-link active" href="/">Home</a>
+          <a class="nav-link" href="/strategy-lab">Strategy Lab</a>
+        </nav>
+      </div>
+    </header>
+
+    <main class="page">
+      <section class="hero">
+        <div class="hero-eyebrow">Professional Migration</div>
+        <h1>Mash Terminal</h1>
+        <p>The next-generation research and trading control layer for the platform. This new frontend runs alongside Streamlit and surfaces live strategy intelligence, worker activity, and experiment progress through the FastAPI stack.</p>
+        <div class="hero-actions">
+          <a class="button" href="/strategy-lab">Open Strategy Lab</a>
+          <a class="button secondary" href="/api/status">View API Status</a>
+        </div>
+      </section>
+
+      <section class="grid" id="home-stats"></section>
+
+      <section class="section">
+        <div class="section-header">
+          <div>
+            <h2 class="section-title">What This Platform Does</h2>
+            <div class="section-copy">A simple entry point for the future product shell, powered by the same shared state and research worker already running behind the scenes.</div>
+          </div>
+        </div>
+        <div class="grid compact">
+          <article class="card featured">
+            <div class="label">Live Research</div>
+            <div class="value">Continuous Strategy Testing</div>
+            <div class="subvalue copy-block">The research worker continuously evaluates challenger variations, logs outcomes, and feeds the Strategy Lab without requiring the Streamlit app to stay open.</div>
+          </article>
+          <article class="card">
+            <div class="label">Shared State</div>
+            <div class="value">One Source Of Truth</div>
+            <div class="subvalue copy-block">Champion state, challenger history, and research activity are all centralized so the future web app, worker, and current tools stay aligned.</div>
+          </article>
+          <article class="card">
+            <div class="label">Next Step Ready</div>
+            <div class="value">Frontend Expansion</div>
+            <div class="subvalue copy-block">This home page establishes the first real entry point for the new app shell while keeping the migration controlled and fully compatible with today’s workflows.</div>
+          </article>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="/static/app.js"></script>
+  <script>
+    const homeStats = document.getElementById("home-stats");
+
+    async function loadHome() {
+      try {
+        const response = await fetch("/api/status");
+        const status = await response.json();
+        homeStats.innerHTML = [
+          renderCard("Current Champion", escapeHtml(status.current_champion_id || "—"), `Version: ${escapeHtml(status.current_champion_version ?? "—")}`),
+          renderCard("Worker Status", statusBadge(status.research_worker_status || "offline"), `Last Seen: ${escapeHtml(status.research_worker_last_seen || "—")}`),
+          renderCard("Experiments Today", escapeHtml(status.experiments_tested_today ?? 0), `Total Experiments: ${escapeHtml(status.total_experiments ?? 0)}`),
+          renderCard("Last Activity", escapeHtml(status.last_activity_time || "—"), `Last Result: ${escapeHtml(status.last_challenger_result || "—")}`)
+        ].join("");
+      } catch (error) {
+        homeStats.innerHTML = renderCard("Home", "Unavailable", "Could not load shared status.");
+      }
+    }
+
+    loadHome();
+    setInterval(loadHome, 5000);
+  </script>
+</body>
+</html>

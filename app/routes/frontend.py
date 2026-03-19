@@ -11,6 +11,11 @@ FRONTEND_DIR = BASE_DIR / "frontend"
 router = APIRouter(tags=["frontend"])
 
 
+@router.get("/")
+def home_page():
+    return FileResponse(FRONTEND_DIR / "home.html")
+
+
 @router.get("/strategy-lab")
 def strategy_lab_page():
     return FileResponse(FRONTEND_DIR / "strategy_lab.html")

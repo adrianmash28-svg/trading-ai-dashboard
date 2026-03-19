@@ -109,6 +109,10 @@ a {
   border: 1px solid var(--border);
 }
 
+.nav-link:hover {
+  color: var(--text);
+}
+
 .page {
   max-width: 1240px;
   margin: 0 auto;
@@ -154,6 +158,33 @@ a {
   line-height: 1.6;
 }
 
+.hero-actions {
+  margin-top: 18px;
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 11px 16px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(83, 217, 176, 0.2), rgba(83, 217, 176, 0.08));
+  border: 1px solid rgba(83, 217, 176, 0.24);
+  color: var(--text);
+  font-size: 0.92rem;
+  font-weight: 600;
+  box-shadow: var(--shadow);
+}
+
+.button.secondary {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: var(--border);
+  color: var(--muted);
+}
+
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -170,6 +201,12 @@ a {
   border-radius: var(--radius);
   padding: 18px;
   box-shadow: var(--shadow);
+}
+
+.card.featured {
+  background:
+    linear-gradient(135deg, rgba(83, 217, 176, 0.12), rgba(17, 28, 41, 0.92)),
+    var(--panel);
 }
 
 .label {
@@ -309,6 +346,12 @@ a {
   margin-top: 22px;
   color: var(--muted);
   font-size: 0.88rem;
+}
+
+.copy-block {
+  color: var(--muted);
+  line-height: 1.7;
+  font-size: 0.98rem;
 }
 
 @media (max-width: 920px) {
