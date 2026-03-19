@@ -1,16 +1,16 @@
 import argparse
 import json
-import os
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import pandas as pd
 import yfinance as yf
 
+from shared.state import append_research_activity, load_strategy_registry, save_strategy_registry
+
 
 APP_TIMEZONE = ZoneInfo("America/Los_Angeles")
-STRATEGY_REGISTRY_FILE = "strategy_registry.json"
 BACKTEST_SYMBOLS = ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "META", "AMZN", "TSLA", "AMD", "IWM", "DIA"]
 STARTING_EQUITY = 10000.0
 APPROVED_EMA_SHORT = [10, 12, 20]
@@ -77,24 +77,6 @@ def sanitize_strategy_parameters(params):
 
 def strategy_to_label(strategy):
     return f"{strategy['id']} (v{strategy['version']})"
-
-
-def load_strategy_registry():
-    with open(STRATEGY_REGISTRY_FILE, "r", encoding="utf-8") as f:
-        registry = json.load(f)
-    registry.setdefault("last_promotion_at", "")
-    registry.setdefault("last_rejection_reason", "")
-    registry.setdefault("promotion_history", [])
-    registry.setdefault("research_worker_status", "offline")
-    registry.setdefault("research_worker_last_seen", "")
-    registry.setdefault("experiments", [])
-    registry.setdefault("experiment_index", len(registry.get("experiments", [])))
-    return registry
-
-
-def save_strategy_registry(registry):
-    with open(STRATEGY_REGISTRY_FILE, "w", encoding="utf-8") as f:
-        json.dump(registry, f, indent=2)
 
 
 def parse_strategy_datetime(value: str):
@@ -439,15 +421,31 @@ def run_strategy_backtest(symbols, params) -> pd.DataFrame:
 
 def run_research_iteration():
     registry = load_strategy_registry()
+    activity_time = now_str()
     registry["research_worker_status"] = "running"
-    registry["research_worker_last_seen"] = now_str()
+    registry["research_worker_last_seen"] = activity_time
+    registry["last_activity_time"] = activity_time
+    save_strategy_registry(registry)
+
     champion = registry["champion"]
     champion_params = sanitize_strategy_parameters(champion.get("parameters", {}))
     champion_summary = champion.get("results_summary", {})
     if not champion_summary:
+        registry["research_worker_status"] = "testing"
+        registry["last_experiment_started_at"] = now_str()
+        registry["research_worker_last_seen"] = registry["last_experiment_started_at"]
+        append_research_activity(registry, f"Backtest started for {strategy_to_label(champion)}")
+        save_strategy_registry(registry)
         champion_trades = run_strategy_backtest(BACKTEST_SYMBOLS, champion_params)
         champion_summary = summarize_backtest_results(champion_trades)
         registry["champion"]["results_summary"] = champion_summary
+        registry["last_experiment_finished_at"] = now_str()
+        registry["research_worker_last_seen"] = registry["last_experiment_finished_at"]
+        append_research_activity(
+            registry,
+            f"Backtest finished for {strategy_to_label(champion)} ({champion_summary.get('num_trades', 0)} trades)",
+        )
+        save_strategy_registry(registry)
 
     existing_keys = {json.dumps(exp.get("parameters", {}), sort_keys=True) for exp in registry.get("experiments", [])}
     next_candidate = None
@@ -460,36 +458,62 @@ def run_research_iteration():
     registry["last_research_run"] = now_str()
     if next_candidate is None:
         registry["last_challenger_result"] = "No new approved challenger variation available"
+        registry["research_worker_status"] = "idle"
+        registry["research_worker_last_seen"] = registry["last_research_run"]
+        append_research_activity(registry, "No new approved challenger variation available", level="warning")
         save_strategy_registry(registry)
         return registry
+
+    experiment_version = registry.get("experiment_index", len(registry.get("experiments", []))) + 1
+    challenger_id = f"challenger-v{experiment_version}"
+    registry["research_worker_status"] = "testing"
+    registry["last_experiment_started_at"] = now_str()
+    registry["research_worker_last_seen"] = registry["last_experiment_started_at"]
+    append_research_activity(registry, f"Generated challenger {challenger_id}")
+    append_research_activity(registry, f"Backtest started for {challenger_id}")
+    save_strategy_registry(registry)
 
     challenger_trades = run_strategy_backtest(BACKTEST_SYMBOLS, next_candidate)
     challenger_summary = summarize_backtest_results(challenger_trades)
     eligible = compare_strategy_results(champion_summary, challenger_summary)
-    experiment_version = len(registry.get("experiments", [])) + 1
     promotion_status = "Promotable" if eligible else "Rejected: Promotion gates not met"
+    finish_time = now_str()
     experiment_record = {
-        "id": f"challenger-v{experiment_version}",
+        "id": challenger_id,
         "version": experiment_version,
         "status": "challenger",
         "parameters": next_candidate,
         "results_summary": challenger_summary,
         "promotion_status": promotion_status,
         "paper_probation_passed": eligible,
-        "created_at": now_str(),
+        "created_at": registry["last_experiment_started_at"],
         "promotion_date": "",
         "promotion_checks": [],
-        "last_tested_at": now_str(),
+        "last_tested_at": finish_time,
         "testing_status": "scheduled" if not eligible else "promotable",
         "latest_result_status": "Promotable" if eligible else "Rejected",
     }
     registry.setdefault("experiments", []).append(experiment_record)
+    registry["experiment_index"] = experiment_version
     registry["challenger"] = experiment_record
     registry["last_challenger_result"] = promotion_status
+    registry["last_experiment_finished_at"] = finish_time
+    registry["research_worker_last_seen"] = finish_time
     if eligible:
         registry["last_promotion_at"] = registry.get("last_promotion_at", "")
+        append_research_activity(
+            registry,
+            f"Backtest finished for {challenger_id} ({challenger_summary.get('num_trades', 0)} trades)",
+        )
+        append_research_activity(registry, f"Promoted-ready {challenger_id}: promotion gates passed", level="success")
     else:
         registry["last_rejection_reason"] = "Promotion gates not met"
+        append_research_activity(
+            registry,
+            f"Backtest finished for {challenger_id} ({challenger_summary.get('num_trades', 0)} trades)",
+        )
+        append_research_activity(registry, f"Rejected {challenger_id}: Promotion gates not met", level="error")
+    registry["research_worker_status"] = "idle"
     save_strategy_registry(registry)
     return registry
 
@@ -511,6 +535,8 @@ def main():
             registry = load_strategy_registry()
             registry["research_worker_status"] = "error"
             registry["research_worker_last_seen"] = now_str()
+            registry["last_activity_time"] = registry["research_worker_last_seen"]
+            append_research_activity(registry, "Research worker iteration failed", level="error")
             save_strategy_registry(registry)
         time.sleep(max(args.sleep_seconds, 60))
 
