@@ -1859,6 +1859,10 @@ def get_setup_verdict(score: float) -> str:
     return "AVOID"
 
 
+def is_actionable_signal(signal_value: str) -> bool:
+    return str(signal_value).strip().upper() in {"LONG SETUP", "SHORT SETUP", "LONG", "SHORT"}
+
+
 def add_paper_trade_from_setup(setup_row, paper_df: pd.DataFrame):
     symbol = str(setup_row["symbol"])
     current_open_count = int((paper_df["status"].astype(str) == "OPEN").sum())
@@ -2919,42 +2923,53 @@ if page == "Home":
             )
 
             open_symbols = {str(trade.get("symbol", "")) for trade in st.session_state.open_trades}
+            actionable_signal = is_actionable_signal(str(setup["signal"]))
             if str(setup["symbol"]) in open_symbols:
                 st.caption("Already open in Paper Trades")
-            elif st.button("Take Trade", key=f'command-center-take-{setup["symbol"]}', use_container_width=True):
-                paper, added = add_paper_trade_from_setup(setup, paper)
-                if added:
-                    st.session_state.open_trades.append(
-                        {
-                            "symbol": str(setup["symbol"]),
-                            "time": str(setup["time"]),
-                            "timestamp": str(setup.get("timestamp", setup["time"])),
-                            "timeframe": str(setup.get("timeframe", "15m")),
-                            "entry": setup["entry"],
-                            "stop_loss": setup["stop_loss"],
-                            "take_profit_1": setup["take_profit_1"],
-                            "take_profit_2": setup["take_profit_2"],
-                            "shares": setup["shares"],
-                            "risk_pct": setup.get("risk_pct", RISK_PER_TRADE * 100),
-                            "account_balance": setup.get("account_balance", current_account_balance),
-                            "base_score": setup.get("base_score", setup["score"]),
-                            "score": setup["score"],
-                            "reason": str(setup.get("reason", "")),
-                            "signal": str(setup["signal"]),
-                            "sentiment_score": setup.get("sentiment_score", 0.0),
-                            "recent_news": setup.get("recent_news", "No"),
-                            "macro_regime": setup.get("macro_regime", "neutral"),
-                            "event_caution": setup.get("event_caution", "None"),
-                            "online_score_adjustment": setup.get("online_score_adjustment", 0),
-                            "news_affected": setup.get("news_affected", "No"),
-                            "status": "OPEN",
-                            "result": "",
-                        }
-                    )
-                    save_paper_trades(paper)
-                    st.success("Trade added to Paper Trades")
+            else:
+                action_col, override_col = st.columns([1.6, 1])
+                if actionable_signal:
+                    take_clicked = action_col.button("TAKE", key=f'command-center-take-{setup["symbol"]}', use_container_width=True)
+                    force_clicked = False
                 else:
-                    st.info("Trade already open")
+                    action_col.button("WATCH", key=f'command-center-watch-{setup["symbol"]}', use_container_width=True, disabled=True)
+                    force_clicked = override_col.button("Force Trade", key=f'command-center-force-{setup["symbol"]}', use_container_width=True)
+                    take_clicked = False
+
+                if take_clicked or force_clicked:
+                    paper, added = add_paper_trade_from_setup(setup, paper)
+                    if added:
+                        st.session_state.open_trades.append(
+                            {
+                                "symbol": str(setup["symbol"]),
+                                "time": str(setup["time"]),
+                                "timestamp": str(setup.get("timestamp", setup["time"])),
+                                "timeframe": str(setup.get("timeframe", "15m")),
+                                "entry": setup["entry"],
+                                "stop_loss": setup["stop_loss"],
+                                "take_profit_1": setup["take_profit_1"],
+                                "take_profit_2": setup["take_profit_2"],
+                                "shares": setup["shares"],
+                                "risk_pct": setup.get("risk_pct", RISK_PER_TRADE * 100),
+                                "account_balance": setup.get("account_balance", current_account_balance),
+                                "base_score": setup.get("base_score", setup["score"]),
+                                "score": setup["score"],
+                                "reason": str(setup.get("reason", "")),
+                                "signal": str(setup["signal"]),
+                                "sentiment_score": setup.get("sentiment_score", 0.0),
+                                "recent_news": setup.get("recent_news", "No"),
+                                "macro_regime": setup.get("macro_regime", "neutral"),
+                                "event_caution": setup.get("event_caution", "None"),
+                                "online_score_adjustment": setup.get("online_score_adjustment", 0),
+                                "news_affected": setup.get("news_affected", "No"),
+                                "status": "OPEN",
+                                "result": "",
+                            }
+                        )
+                        save_paper_trades(paper)
+                        st.success("Trade added to Paper Trades")
+                    else:
+                        st.info("Trade already open")
 
     st.markdown("### Open Trades")
     if open_trades.empty:
@@ -3514,41 +3529,52 @@ elif page == "Trades":
             bottom_metrics[3].metric("Shares", int(setup["shares"]))
 
             open_symbols = {str(trade.get("symbol", "")) for trade in st.session_state.open_trades}
+            actionable_signal = is_actionable_signal(str(setup["signal"]))
             if str(setup["symbol"]) in open_symbols:
                 st.caption("Already open in Paper Trades")
-            elif st.button("Take Trade", key=f'trades-take-{setup["symbol"]}', use_container_width=True):
-                paper, added = add_paper_trade_from_setup(setup, paper)
-                if added:
-                    session_trade = {
-                        "symbol": str(setup["symbol"]),
-                        "time": str(setup["time"]),
-                        "timestamp": str(setup.get("timestamp", setup["time"])),
-                        "timeframe": str(setup.get("timeframe", "15m")),
-                        "entry": setup["entry"],
-                        "stop_loss": setup["stop_loss"],
-                        "take_profit_1": setup["take_profit_1"],
-                        "take_profit_2": setup["take_profit_2"],
-                        "shares": setup["shares"],
-                        "risk_pct": setup.get("risk_pct", RISK_PER_TRADE * 100),
-                        "account_balance": setup.get("account_balance", current_account_balance),
-                        "base_score": setup.get("base_score", setup["score"]),
-                        "score": setup["score"],
-                        "reason": str(setup.get("reason", "")),
-                        "signal": str(setup["signal"]),
-                        "sentiment_score": setup.get("sentiment_score", 0.0),
-                        "recent_news": setup.get("recent_news", "No"),
-                        "macro_regime": setup.get("macro_regime", "neutral"),
-                        "event_caution": setup.get("event_caution", "None"),
-                        "online_score_adjustment": setup.get("online_score_adjustment", 0),
-                        "news_affected": setup.get("news_affected", "No"),
-                        "status": "OPEN",
-                        "result": "",
-                    }
-                    st.session_state.open_trades.append(session_trade)
-                    save_paper_trades(paper)
-                    st.success("Trade added to Paper Trades")
+            else:
+                action_col, override_col = st.columns([1.6, 1])
+                if actionable_signal:
+                    take_clicked = action_col.button("TAKE", key=f'trades-take-{setup["symbol"]}', use_container_width=True)
+                    force_clicked = False
                 else:
-                    st.info("Trade already open")
+                    action_col.button("WATCH", key=f'trades-watch-{setup["symbol"]}', use_container_width=True, disabled=True)
+                    force_clicked = override_col.button("Force Trade", key=f'trades-force-{setup["symbol"]}', use_container_width=True)
+                    take_clicked = False
+
+                if take_clicked or force_clicked:
+                    paper, added = add_paper_trade_from_setup(setup, paper)
+                    if added:
+                        session_trade = {
+                            "symbol": str(setup["symbol"]),
+                            "time": str(setup["time"]),
+                            "timestamp": str(setup.get("timestamp", setup["time"])),
+                            "timeframe": str(setup.get("timeframe", "15m")),
+                            "entry": setup["entry"],
+                            "stop_loss": setup["stop_loss"],
+                            "take_profit_1": setup["take_profit_1"],
+                            "take_profit_2": setup["take_profit_2"],
+                            "shares": setup["shares"],
+                            "risk_pct": setup.get("risk_pct", RISK_PER_TRADE * 100),
+                            "account_balance": setup.get("account_balance", current_account_balance),
+                            "base_score": setup.get("base_score", setup["score"]),
+                            "score": setup["score"],
+                            "reason": str(setup.get("reason", "")),
+                            "signal": str(setup["signal"]),
+                            "sentiment_score": setup.get("sentiment_score", 0.0),
+                            "recent_news": setup.get("recent_news", "No"),
+                            "macro_regime": setup.get("macro_regime", "neutral"),
+                            "event_caution": setup.get("event_caution", "None"),
+                            "online_score_adjustment": setup.get("online_score_adjustment", 0),
+                            "news_affected": setup.get("news_affected", "No"),
+                            "status": "OPEN",
+                            "result": "",
+                        }
+                        st.session_state.open_trades.append(session_trade)
+                        save_paper_trades(paper)
+                        st.success("Trade added to Paper Trades")
+                    else:
+                        st.info("Trade already open")
 
             st.markdown("")
 
@@ -3802,41 +3828,52 @@ elif page == "Setups":
             bottom_metrics[3].metric("Signal", str(setup["signal"]))
 
             open_symbols = {str(trade.get("symbol", "")) for trade in st.session_state.open_trades}
+            actionable_signal = is_actionable_signal(str(setup["signal"]))
             if str(setup["symbol"]) in open_symbols:
                 st.caption("Already open in Paper Trades")
-            elif st.button("Take Trade", key=f'take-trade-{setup["symbol"]}', use_container_width=True):
-                paper, added = add_paper_trade_from_setup(setup, paper)
-                if added:
-                    session_trade = {
-                        "symbol": str(setup["symbol"]),
-                        "time": str(setup["time"]),
-                        "timestamp": str(setup.get("timestamp", setup["time"])),
-                        "timeframe": str(setup.get("timeframe", "15m")),
-                        "entry": setup["entry"],
-                        "stop_loss": setup["stop_loss"],
-                        "take_profit_1": setup["take_profit_1"],
-                        "take_profit_2": setup["take_profit_2"],
-                        "shares": setup["shares"],
-                        "risk_pct": setup.get("risk_pct", RISK_PER_TRADE * 100),
-                        "account_balance": setup.get("account_balance", current_account_balance),
-                        "base_score": setup.get("base_score", setup["score"]),
-                        "score": setup["score"],
-                        "reason": str(setup.get("reason", "")),
-                        "signal": str(setup["signal"]),
-                        "sentiment_score": setup.get("sentiment_score", 0.0),
-                        "recent_news": setup.get("recent_news", "No"),
-                        "macro_regime": setup.get("macro_regime", "neutral"),
-                        "event_caution": setup.get("event_caution", "None"),
-                        "online_score_adjustment": setup.get("online_score_adjustment", 0),
-                        "news_affected": setup.get("news_affected", "No"),
-                        "status": "OPEN",
-                        "result": "",
-                    }
-                    st.session_state.open_trades.append(session_trade)
-                    save_paper_trades(paper)
-                    st.success("Trade added to Paper Trades")
+            else:
+                action_col, override_col = st.columns([1.6, 1])
+                if actionable_signal:
+                    take_clicked = action_col.button("TAKE", key=f'take-trade-{setup["symbol"]}', use_container_width=True)
+                    force_clicked = False
                 else:
-                    st.info("Trade already open")
+                    action_col.button("SETUP", key=f'setup-watch-{setup["symbol"]}', use_container_width=True, disabled=True)
+                    force_clicked = override_col.button("Force Trade", key=f'setup-force-{setup["symbol"]}', use_container_width=True)
+                    take_clicked = False
+
+                if take_clicked or force_clicked:
+                    paper, added = add_paper_trade_from_setup(setup, paper)
+                    if added:
+                        session_trade = {
+                            "symbol": str(setup["symbol"]),
+                            "time": str(setup["time"]),
+                            "timestamp": str(setup.get("timestamp", setup["time"])),
+                            "timeframe": str(setup.get("timeframe", "15m")),
+                            "entry": setup["entry"],
+                            "stop_loss": setup["stop_loss"],
+                            "take_profit_1": setup["take_profit_1"],
+                            "take_profit_2": setup["take_profit_2"],
+                            "shares": setup["shares"],
+                            "risk_pct": setup.get("risk_pct", RISK_PER_TRADE * 100),
+                            "account_balance": setup.get("account_balance", current_account_balance),
+                            "base_score": setup.get("base_score", setup["score"]),
+                            "score": setup["score"],
+                            "reason": str(setup.get("reason", "")),
+                            "signal": str(setup["signal"]),
+                            "sentiment_score": setup.get("sentiment_score", 0.0),
+                            "recent_news": setup.get("recent_news", "No"),
+                            "macro_regime": setup.get("macro_regime", "neutral"),
+                            "event_caution": setup.get("event_caution", "None"),
+                            "online_score_adjustment": setup.get("online_score_adjustment", 0),
+                            "news_affected": setup.get("news_affected", "No"),
+                            "status": "OPEN",
+                            "result": "",
+                        }
+                        st.session_state.open_trades.append(session_trade)
+                        save_paper_trades(paper)
+                        st.success("Trade added to Paper Trades")
+                    else:
+                        st.info("Trade already open")
 
             st.markdown("")
 
