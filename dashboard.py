@@ -2039,19 +2039,35 @@ def render_strategy_lab_section(strategy_registry):
     challenger = strategy_registry.get("challenger")
     champion_summary = champion.get("results_summary", {})
     next_research_run = get_next_research_run(strategy_registry)
+    def render_lab_status_card(label: str, value: str):
+        st.markdown(
+            f"""
+            <div class="top-trade-banner" style="min-height: 132px; padding: 1rem 1.05rem; border-color: rgba(71, 85, 105, 0.5);">
+                <div class="top-trade-kicker">{label}</div>
+                <div style="margin-top: 0.55rem; font-size: 1rem; line-height: 1.45; color: #e2e8f0; word-break: break-word;">
+                    {value}
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
     status_left, status_right, status_third = st.columns(3)
-    status_left.metric(
-        "Last Challenger Run",
-        format_strategy_timestamp(strategy_registry.get("last_research_run", "")),
-    )
-    status_right.metric(
-        "Next Estimated Run",
-        next_research_run.strftime("%b %d, %Y %-I:%M %p"),
-    )
-    status_third.metric(
-        "Last Result",
-        strategy_registry.get("last_challenger_result", "Not yet run") or "Not yet run",
-    )
+    with status_left:
+        render_lab_status_card(
+            "Last Challenger Run",
+            format_strategy_timestamp(strategy_registry.get("last_research_run", "")),
+        )
+    with status_right:
+        render_lab_status_card(
+            "Next Estimated Run",
+            next_research_run.strftime("%b %d, %Y %-I:%M %p"),
+        )
+    with status_third:
+        render_lab_status_card(
+            "Last Result",
+            strategy_registry.get("last_challenger_result", "Not yet run") or "Not yet run",
+        )
     st.caption(f"Controlled research loop cadence: every {RESEARCH_LOOP_HOURS} hours on app activity.")
 
     action_col1, action_col2 = st.columns(2)
@@ -2077,16 +2093,23 @@ def render_strategy_lab_section(strategy_registry):
             <div class="top-trade-banner" style="border-color: rgba(56, 189, 248, 0.55);">
                 <div class="top-trade-kicker">Live Strategy</div>
                 <div class="top-trade-value">{strategy_to_label(champion)}</div>
-                <div class="app-subtitle" style="margin-top: 0.5rem;">{champion.get("promotion_status", "Live champion")}</div>
+                <div class="app-subtitle" style="margin-top: 0.5rem; white-space: normal; word-break: break-word; line-height: 1.45; font-size: 0.95rem;">
+                    {champion.get("promotion_status", "Live champion")}
+                </div>
             </div>
             """,
             unsafe_allow_html=True,
         )
-        st.caption(f"Promotion date: {format_strategy_timestamp(champion.get('promotion_date', ''))}")
-        st.caption(
-            f"Last tested: {format_strategy_timestamp(champion.get('last_tested_at', ''))} | "
-            f"Status: {champion.get('testing_status', 'active').title()} | "
-            f"Latest result: {champion.get('latest_result_status', 'Awaiting test')}"
+        st.markdown(
+            f"""
+            <div style="margin-top: 0.35rem; color: #94a3b8; font-size: 0.92rem; line-height: 1.55;">
+                <div><strong style="color: #cbd5e1;">Promotion date:</strong> {format_strategy_timestamp(champion.get('promotion_date', ''))}</div>
+                <div><strong style="color: #cbd5e1;">Last tested:</strong> {format_strategy_timestamp(champion.get('last_tested_at', ''))}</div>
+                <div><strong style="color: #cbd5e1;">Testing status:</strong> {champion.get('testing_status', 'active').title()}</div>
+                <div><strong style="color: #cbd5e1;">Latest result:</strong> {champion.get('latest_result_status', 'Awaiting test')}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
         if st.button("Retest Champion", key="retest-champion", use_container_width=True):
             strategy_registry, updated = retest_strategy_by_id(strategy_registry, champion.get("id", ""))
@@ -2100,18 +2123,25 @@ def render_strategy_lab_section(strategy_registry):
             st.markdown(
                 f"""
                 <div class="top-trade-banner" style="border-color: rgba(251, 191, 36, 0.55);">
-                    <div class="top-trade-kicker">Experimental Candidate</div>
-                    <div class="top-trade-value">{strategy_to_label(challenger)}</div>
-                    <div class="app-subtitle" style="margin-top: 0.5rem;">{challenger.get("promotion_status", "Under review")}</div>
+                <div class="top-trade-kicker">Experimental Candidate</div>
+                <div class="top-trade-value">{strategy_to_label(challenger)}</div>
+                <div class="app-subtitle" style="margin-top: 0.5rem; white-space: normal; word-break: break-word; line-height: 1.45; font-size: 0.95rem;">
+                    {challenger.get("promotion_status", "Under review")}
+                </div>
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
-            st.caption(f"Recorded: {format_strategy_timestamp(challenger.get('created_at', ''))}")
-            st.caption(
-                f"Last tested: {format_strategy_timestamp(challenger.get('last_tested_at', ''))} | "
-                f"Status: {challenger.get('testing_status', 'scheduled').title()} | "
-                f"Latest result: {challenger.get('latest_result_status', 'Awaiting test')}"
+            st.markdown(
+                f"""
+                <div style="margin-top: 0.35rem; color: #94a3b8; font-size: 0.92rem; line-height: 1.55;">
+                    <div><strong style="color: #cbd5e1;">Recorded:</strong> {format_strategy_timestamp(challenger.get('created_at', ''))}</div>
+                    <div><strong style="color: #cbd5e1;">Last tested:</strong> {format_strategy_timestamp(challenger.get('last_tested_at', ''))}</div>
+                    <div><strong style="color: #cbd5e1;">Testing status:</strong> {challenger.get('testing_status', 'scheduled').title()}</div>
+                    <div><strong style="color: #cbd5e1;">Latest result:</strong> {challenger.get('latest_result_status', 'Awaiting test')}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
             )
             if st.button("Retest Challenger", key="retest-challenger", use_container_width=True):
                 strategy_registry, updated = retest_strategy_by_id(strategy_registry, challenger.get("id", ""))
