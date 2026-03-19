@@ -67,6 +67,7 @@ MAX_DRAWDOWN_DEGRADATION = 0.10
 APP_TIMEZONE = ZoneInfo("America/Los_Angeles")
 RESEARCH_LOOP_MINUTES = 20
 RESEARCH_CATCHUP_LIMIT = 3
+RESEARCH_WORKER_HEARTBEAT_MINUTES = 45
 MAX_ONLINE_SCORE_ADJUSTMENT = 6
 NEWS_LOOKBACK_HOURS = 48
 
@@ -162,6 +163,8 @@ def default_strategy_registry():
         "last_promotion_at": "",
         "last_rejection_reason": "",
         "promotion_history": [],
+        "research_worker_status": "offline",
+        "research_worker_last_seen": "",
     }
 
 
@@ -239,6 +242,8 @@ def load_strategy_registry():
         save_strategy_registry(registry)
     registry["champion"]["parameters"] = sanitize_strategy_parameters(registry["champion"].get("parameters", {}))
     registry["champion"] = normalize_strategy_record(registry["champion"], "active")
+    registry.setdefault("research_worker_status", "offline")
+    registry.setdefault("research_worker_last_seen", "")
     if registry.get("challenger"):
         registry["challenger"]["parameters"] = sanitize_strategy_parameters(registry["challenger"].get("parameters", {}))
         registry["challenger"] = normalize_strategy_record(registry["challenger"], "scheduled")
@@ -1585,6 +1590,13 @@ def parse_strategy_datetime(value: str):
     return parsed.tz_convert(APP_TIMEZONE)
 
 
+def research_worker_is_running(registry):
+    last_seen = parse_strategy_datetime(registry.get("research_worker_last_seen", ""))
+    if last_seen is None:
+        return False
+    return datetime.now(APP_TIMEZONE) - last_seen <= timedelta(minutes=RESEARCH_WORKER_HEARTBEAT_MINUTES)
+
+
 def summarize_research_activity(registry, since_time: str = ""):
     since_dt = parse_strategy_datetime(since_time)
     now_local = datetime.now(APP_TIMEZONE)
@@ -2368,6 +2380,9 @@ def render_strategy_lab_section(strategy_registry):
     research_summary_since_update = summarize_research_activity(strategy_registry, algo_state.get("last_sent_at", ""))
     last_research_run_raw = strategy_registry.get("last_research_run", "")
     last_promotion_raw = strategy_registry.get("last_promotion_at", "") or champion.get("promotion_date", "")
+    worker_running = research_worker_is_running(strategy_registry)
+    worker_status_label = "Running" if worker_running else "Offline / Fallback"
+    worker_last_seen = format_strategy_timestamp(strategy_registry.get("research_worker_last_seen", ""))
 
     def parse_strategy_time(value: str):
         if not value:
@@ -2443,6 +2458,12 @@ def render_strategy_lab_section(strategy_registry):
             "The live algorithm only changes when promotion gates are passed."
         )
         render_lab_status_card("How Promotion Works", explanation_text)
+
+    worker_col1, worker_col2 = st.columns(2)
+    with worker_col1:
+        render_lab_status_card("Research Worker", worker_status_label)
+    with worker_col2:
+        render_lab_status_card("Worker Last Seen", worker_last_seen)
 
     insight1, insight2, insight3 = st.columns(3)
     with insight1:
@@ -3029,7 +3050,8 @@ st.markdown(
 symbols = DEFAULT_SYMBOLS
 paper = load_paper_trades()
 strategy_registry = load_strategy_registry()
-strategy_registry = maybe_run_controlled_research_loop(strategy_registry)
+if not research_worker_is_running(strategy_registry):
+    strategy_registry = maybe_run_controlled_research_loop(strategy_registry)
 algo_update_info = maybe_send_algorithm_status_update(strategy_registry)
 if "trading_mode" not in st.session_state:
     st.session_state.trading_mode = "Auto"
