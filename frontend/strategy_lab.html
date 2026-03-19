@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mash Terminal Strategy Lab</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #09111b;
+      --panel: #111c29;
+      --panel-soft: #162332;
+      --border: rgba(148, 163, 184, 0.18);
+      --text: #e6edf5;
+      --muted: #95a4b8;
+      --accent: #4dd4ac;
+      --warn: #f2c96b;
+      --bad: #ff7f7f;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+      background: linear-gradient(180deg, #08111b 0%, #0e1725 100%);
+      color: var(--text);
+    }
+
+    .page {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 28px 20px 48px;
+    }
+
+    .hero {
+      margin-bottom: 20px;
+      padding: 24px;
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      background: linear-gradient(135deg, rgba(77, 212, 172, 0.12), rgba(17, 28, 41, 0.92));
+    }
+
+    .hero h1 {
+      margin: 0 0 8px;
+      font-size: 2rem;
+      line-height: 1.1;
+    }
+
+    .hero p {
+      margin: 0;
+      color: var(--muted);
+      max-width: 760px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 14px;
+      margin-bottom: 18px;
+    }
+
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 16px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
+    }
+
+    .label {
+      font-size: 0.78rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 10px;
+    }
+
+    .value {
+      font-size: 1.35rem;
+      font-weight: 700;
+      line-height: 1.2;
+      word-break: break-word;
+    }
+
+    .subvalue {
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 0.92rem;
+      line-height: 1.4;
+      word-break: break-word;
+    }
+
+    .section {
+      margin-top: 22px;
+    }
+
+    .section h2 {
+      margin: 0 0 12px;
+      font-size: 1.05rem;
+      letter-spacing: 0.02em;
+    }
+
+    .list {
+      display: grid;
+      gap: 12px;
+    }
+
+    .list-item {
+      background: var(--panel-soft);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 14px 16px;
+    }
+
+    .item-top {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 6px;
+    }
+
+    .item-title {
+      font-weight: 700;
+    }
+
+    .item-time {
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    .item-meta {
+      color: var(--muted);
+      font-size: 0.92rem;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: 4px 10px;
+      font-size: 0.78rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      background: rgba(77, 212, 172, 0.12);
+      color: var(--accent);
+      border: 1px solid rgba(77, 212, 172, 0.24);
+    }
+
+    .badge.warn {
+      color: var(--warn);
+      background: rgba(242, 201, 107, 0.1);
+      border-color: rgba(242, 201, 107, 0.22);
+    }
+
+    .badge.bad {
+      color: var(--bad);
+      background: rgba(255, 127, 127, 0.1);
+      border-color: rgba(255, 127, 127, 0.22);
+    }
+
+    .empty {
+      color: var(--muted);
+      padding: 14px 0;
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <section class="hero">
+      <h1>Strategy Lab</h1>
+      <p>Live research visibility for Mash Terminal. This page reads directly from the new FastAPI Strategy Lab endpoints and refreshes automatically.</p>
+    </section>
+
+    <section class="grid" id="summary-grid"></section>
+
+    <section class="section">
+      <h2>Current Strategies</h2>
+      <div class="grid" id="strategies-grid"></div>
+    </section>
+
+    <section class="section">
+      <h2>Recent Research Activity</h2>
+      <div class="list" id="activity-list"></div>
+    </section>
+
+    <section class="section">
+      <h2>Recent Experiments</h2>
+      <div class="list" id="experiments-list"></div>
+    </section>
+  </main>
+
+  <script>
+    const summaryGrid = document.getElementById("summary-grid");
+    const strategiesGrid = document.getElementById("strategies-grid");
+    const activityList = document.getElementById("activity-list");
+    const experimentsList = document.getElementById("experiments-list");
+
+    function escapeHtml(value) {
+      return String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    function statusBadge(value) {
+      const text = escapeHtml(value || "unknown");
+      const lowered = String(value || "").toLowerCase();
+      let klass = "";
+      if (lowered.includes("reject") || lowered.includes("error") || lowered === "offline") klass = "bad";
+      else if (lowered.includes("idle") || lowered.includes("promot")) klass = "warn";
+      return `<span class="badge ${klass}">${text}</span>`;
+    }
+
+    function renderCard(label, value, subvalue = "") {
+      return `
+        <article class="card">
+          <div class="label">${escapeHtml(label)}</div>
+          <div class="value">${value}</div>
+          ${subvalue ? `<div class="subvalue">${subvalue}</div>` : ""}
+        </article>
+      `;
+    }
+
+    function renderStrategy(title, strategy) {
+      if (!strategy) {
+        return renderCard(title, "None", "No strategy available.");
+      }
+      const results = strategy.results_summary || {};
+      const subvalue = [
+        `Version: ${escapeHtml(strategy.version ?? "-")}`,
+        `Status: ${escapeHtml(strategy.latest_result_status || strategy.promotion_status || "-")}`,
+        `Trades: ${escapeHtml(results.num_trades ?? 0)}`,
+        `P&L: $${escapeHtml(results.total_pnl ?? 0)}`,
+        `Win Rate: ${escapeHtml(results.win_rate ?? 0)}%`
+      ].join("<br>");
+      return renderCard(title, escapeHtml(strategy.id || "Unknown"), subvalue);
+    }
+
+    function renderActivity(items) {
+      if (!items.length) {
+        activityList.innerHTML = `<div class="empty">No research activity recorded yet.</div>`;
+        return;
+      }
+      activityList.innerHTML = items.map((item) => `
+        <article class="list-item">
+          <div class="item-top">
+            <div class="item-title">${escapeHtml(item.message || "Activity")}</div>
+            <div class="item-time">${escapeHtml(item.time || "")}</div>
+          </div>
+          <div class="item-meta">${statusBadge(item.level || "info")}</div>
+        </article>
+      `).join("");
+    }
+
+    function renderExperiments(items) {
+      if (!items.length) {
+        experimentsList.innerHTML = `<div class="empty">No experiments recorded yet.</div>`;
+        return;
+      }
+      experimentsList.innerHTML = items.map((exp) => {
+        const results = exp.results_summary || {};
+        return `
+          <article class="list-item">
+            <div class="item-top">
+              <div class="item-title">${escapeHtml(exp.id || "Experiment")}</div>
+              <div class="item-time">${escapeHtml(exp.created_at || "")}</div>
+            </div>
+            <div class="item-meta">
+              ${statusBadge(exp.latest_result_status || exp.testing_status || "unknown")}
+              <br>P&L: $${escapeHtml(results.total_pnl ?? 0)}
+              <br>Win Rate: ${escapeHtml(results.win_rate ?? 0)}%
+              <br>Trades: ${escapeHtml(results.num_trades ?? 0)}
+              <br>Drawdown: $${escapeHtml(results.max_drawdown ?? 0)}
+            </div>
+          </article>
+        `;
+      }).join("");
+    }
+
+    async function loadStrategyLab() {
+      try {
+        const [summaryRes, activityRes, experimentsRes] = await Promise.all([
+          fetch("/api/strategy-lab/summary"),
+          fetch("/api/strategy-lab/activity?limit=12"),
+          fetch("/api/strategy-lab/experiments?limit=8")
+        ]);
+
+        const summary = await summaryRes.json();
+        const activity = await activityRes.json();
+        const experiments = await experimentsRes.json();
+
+        summaryGrid.innerHTML = [
+          renderCard("Worker Status", statusBadge(summary.research_worker_status || "offline"), `Last Seen: ${escapeHtml(summary.research_worker_last_seen || "—")}`),
+          renderCard("Last Activity", escapeHtml(summary.last_activity_time || "—")),
+          renderCard("Experiments Today", escapeHtml(summary.experiments_tested_today ?? 0), `Total: ${escapeHtml(summary.total_experiments ?? 0)}`),
+          renderCard("Last Result", escapeHtml(summary.last_challenger_result || "—"), `Rejection: ${escapeHtml(summary.last_rejection_reason || "—")}`)
+        ].join("");
+
+        strategiesGrid.innerHTML = [
+          renderStrategy("Current Champion", summary.current_champion),
+          renderStrategy("Current Challenger", summary.current_challenger)
+        ].join("");
+
+        renderActivity(activity.items || []);
+        renderExperiments(experiments.items || []);
+      } catch (error) {
+        summaryGrid.innerHTML = renderCard("Strategy Lab", "Unavailable", "Could not load API data.");
+        activityList.innerHTML = `<div class="empty">${escapeHtml(error.message || "Unknown error")}</div>`;
+        experimentsList.innerHTML = "";
+        strategiesGrid.innerHTML = "";
+      }
+    }
+
+    loadStrategyLab();
+    setInterval(loadStrategyLab, 5000);
+  </script>
+</body>
+</html>
