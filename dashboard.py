@@ -2089,8 +2089,35 @@ def render_strategy_lab_section(strategy_registry):
 
     champion = strategy_registry["champion"]
     challenger = strategy_registry.get("challenger")
+    latest_experiment = strategy_registry.get("experiments", [])[-1] if strategy_registry.get("experiments") else None
     champion_summary = champion.get("results_summary", {})
     next_research_run = get_next_research_run(strategy_registry)
+    last_research_run_raw = strategy_registry.get("last_research_run", "")
+    last_promotion_raw = champion.get("promotion_date", "")
+
+    def parse_strategy_time(value: str):
+        if not value:
+            return None
+        parsed = pd.to_datetime(value, errors="coerce")
+        if pd.isna(parsed):
+            return None
+        if getattr(parsed, "tzinfo", None) is None:
+            return parsed.tz_localize(APP_TIMEZONE)
+        return parsed.tz_convert(APP_TIMEZONE)
+
+    last_research_dt = parse_strategy_time(last_research_run_raw)
+    last_promotion_dt = parse_strategy_time(last_promotion_raw)
+    live_algo_changed = bool(
+        last_research_dt
+        and last_promotion_dt
+        and last_promotion_dt >= last_research_dt
+    )
+    last_challenger_version = "None yet"
+    if challenger:
+        last_challenger_version = strategy_to_label(challenger)
+    elif latest_experiment:
+        last_challenger_version = strategy_to_label(latest_experiment)
+
     def render_lab_status_card(label: str, value: str):
         st.markdown(
             f"""
@@ -2121,6 +2148,24 @@ def render_strategy_lab_section(strategy_registry):
             strategy_registry.get("last_challenger_result", "Not yet run") or "Not yet run",
         )
     st.caption(f"Controlled research loop cadence: every {RESEARCH_LOOP_HOURS} hours on app activity.")
+
+    meta1, meta2, meta3 = st.columns(3)
+    with meta1:
+        render_lab_status_card("Current Champion Version", strategy_to_label(champion))
+    with meta2:
+        render_lab_status_card("Last Challenger Version Tested", last_challenger_version)
+    with meta3:
+        render_lab_status_card("Live Algorithm Changed", "Yes" if live_algo_changed else "No")
+
+    meta4, meta5 = st.columns(2)
+    with meta4:
+        render_lab_status_card("Last Promotion Date", format_strategy_timestamp(last_promotion_raw))
+    with meta5:
+        explanation_text = (
+            f"Challengers are tested on the {RESEARCH_LOOP_HOURS}-hour research cadence. "
+            "The live algorithm only changes when promotion gates are passed."
+        )
+        render_lab_status_card("How Promotion Works", explanation_text)
 
     action_col1, action_col2 = st.columns(2)
     with action_col1:
