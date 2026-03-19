@@ -41,7 +41,7 @@ VERIZON_SMS_GATEWAY = "3109911161@vtext.com"
 
 PAPER_TRADES_FILE = "paper_trades.csv"
 DEFAULT_SYMBOLS = ["AAPL", "MSFT", "NVDA", "META", "AMZN", "TSLA", "AMD", "QQQ", "SPY", "IWM", "DIA", "BTC-USD", "ETH-USD"]
-BACKTEST_SYMBOLS = ["SPY", "QQQ", "IWM", "DIA", "NVDA", "TSLA", "AAPL", "MSFT", "META", "AMZN", "GOOGL", "AMD", "BTC-USD", "ETH-USD"]
+BACKTEST_SYMBOLS = ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "META", "AMZN", "TSLA", "AMD", "IWM", "DIA"]
 STRATEGY_REGISTRY_FILE = "strategy_registry.json"
 ALGO_UPDATE_STATE_FILE = "algo_update_state.json"
 STARTING_EQUITY = 10000.0
@@ -50,9 +50,9 @@ MAX_SIMULTANEOUS_TRADES = 3
 APPROVED_EMA_SHORT = [10, 12, 20]
 APPROVED_EMA_LONG = [34, 50, 60]
 APPROVED_SCORE_THRESHOLDS = [60, 65, 70, 75]
-APPROVED_RSI_LONG = [55, 58, 60]
-APPROVED_RSI_SHORT = [45, 42, 40]
-APPROVED_REL_VOL = [1.5, 1.6, 1.8]
+APPROVED_RSI_LONG = [53, 55, 58, 60]
+APPROVED_RSI_SHORT = [47, 45, 42, 40]
+APPROVED_REL_VOL = [1.4, 1.5, 1.6, 1.8]
 APPROVED_STOP_MULTIPLIERS = [1.0, 1.1, 1.2]
 APPROVED_TP1_MULTIPLIERS = [1.3, 1.5, 1.7]
 APPROVED_TP2_MULTIPLIERS = [2.0, 2.3, 2.6]
@@ -99,10 +99,10 @@ def get_risk_fraction(score: float) -> float:
 
 def default_strategy_parameters():
     return {
-        "score_threshold": 70,
-        "rsi_long_min": 55,
-        "rsi_short_max": 45,
-        "rel_vol_min": 1.5,
+        "score_threshold": 65,
+        "rsi_long_min": 53,
+        "rsi_short_max": 47,
+        "rel_vol_min": 1.4,
         "ema_short_len": 20,
         "ema_long_len": 50,
         "stop_multiplier": 1.0,
@@ -147,6 +147,9 @@ def default_strategy_registry():
             "promotion_status": "Live champion",
             "paper_probation_passed": True,
             "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "last_tested_at": "",
+            "testing_status": "active",
+            "latest_result_status": "Awaiting test",
         },
         "previous_champion": None,
         "challenger": None,
@@ -216,9 +219,28 @@ def load_strategy_registry():
             "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         }
         save_strategy_registry(registry)
+    if registry["champion"].get("version", 4) < 5:
+        registry["previous_champion"] = registry.get("champion")
+        registry["champion"] = {
+            "id": "champion-v5",
+            "version": 5,
+            "status": "champion",
+            "parameters": default_strategy_parameters(),
+            "results_summary": {},
+            "promotion_status": "Live champion slightly loosened with debug-ready thresholds to surface valid trades",
+            "paper_probation_passed": True,
+            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        save_strategy_registry(registry)
     registry["champion"]["parameters"] = sanitize_strategy_parameters(registry["champion"].get("parameters", {}))
+    registry["champion"] = normalize_strategy_record(registry["champion"], "active")
     if registry.get("challenger"):
         registry["challenger"]["parameters"] = sanitize_strategy_parameters(registry["challenger"].get("parameters", {}))
+        registry["challenger"] = normalize_strategy_record(registry["challenger"], "scheduled")
+    registry["experiments"] = [
+        normalize_strategy_record(exp, "historical")
+        for exp in registry.get("experiments", [])
+    ]
     return registry
 
 
@@ -805,6 +827,32 @@ def build_signal_snapshot(
     )
     timeframe = "15m"
     snapshot_timestamp = str(work_df.index[-1])
+    preferred_direction = "LONG" if long_score >= short_score else "SHORT"
+    selected_score = long_score if preferred_direction == "LONG" else short_score
+    selected_trend_pass = trend_up if preferred_direction == "LONG" else trend_down
+    selected_rsi_pass = rsi14 > params["rsi_long_min"] if preferred_direction == "LONG" else rsi14 < params["rsi_short_max"]
+    selected_volume_pass = rel_vol >= params["rel_vol_min"]
+    selected_breakout_pass = confirmed_breakout if preferred_direction == "LONG" else confirmed_breakdown
+    selected_rr = long_rr if preferred_direction == "LONG" else short_rr
+    selected_rr_pass = selected_rr >= 2.0
+    selected_score_pass = selected_score >= params["score_threshold"]
+    selected_market_pass = allow_long if preferred_direction == "LONG" else allow_short
+
+    rejection_reason = ""
+    if not selected_trend_pass:
+        rejection_reason = "failed trend filter"
+    elif not selected_rsi_pass:
+        rejection_reason = "failed RSI filter"
+    elif not selected_volume_pass:
+        rejection_reason = "failed volume filter"
+    elif not selected_breakout_pass:
+        rejection_reason = "failed breakout filter"
+    elif not selected_rr_pass:
+        rejection_reason = "failed reward/risk filter"
+    elif not selected_score_pass:
+        rejection_reason = "failed score filter"
+    elif not selected_market_pass:
+        rejection_reason = "failed market regime filter"
 
     if long_score >= short_score and long_score >= params["score_threshold"] and trend_up and rel_vol >= params["rel_vol_min"] and rsi14 > params["rsi_long_min"] and long_rr >= 2.0 and confirmed_breakout and allow_long:
         signal = "LONG SETUP"
@@ -868,6 +916,15 @@ def build_signal_snapshot(
         "news_affected": "Yes" if news_context["news_affected"] else "No",
         "rel_vol": round(rel_vol, 2),
         "change_pct": round(change_pct, 2),
+        "preferred_direction": preferred_direction,
+        "debug_trend_pass": selected_trend_pass,
+        "debug_rsi_pass": selected_rsi_pass,
+        "debug_volume_pass": selected_volume_pass,
+        "debug_breakout_pass": selected_breakout_pass,
+        "debug_rr_pass": selected_rr_pass,
+        "debug_score_pass": selected_score_pass,
+        "debug_market_pass": selected_market_pass,
+        "rejection_reason": rejection_reason if signal == "NO SIGNAL" else "",
     }
 
 
@@ -900,11 +957,35 @@ def calc_live_signals(symbols):
 
 
 @st.cache_data(ttl=900)
-def run_strategy_backtest(symbols, period: str = "3y", interval: str = "1d", strategy_params_json: str = "") -> pd.DataFrame:
+def run_strategy_backtest(symbols, period: str = "3y", interval: str = "1d", strategy_params_json: str = "", collect_debug: bool = False):
     results = []
     current_equity = STARTING_EQUITY
     market_history = fetch_history("SPY", period=period, interval=interval)
     strategy_params = sanitize_strategy_parameters(json.loads(strategy_params_json) if strategy_params_json else {})
+    debug_summary = {
+        "symbols_scanned": len(symbols),
+        "bars_evaluated": 0,
+        "trades_triggered": 0,
+        "filter_pass_counts": {
+            "trend": 0,
+            "rsi": 0,
+            "volume": 0,
+            "breakout": 0,
+            "reward_risk": 0,
+            "score": 0,
+            "market_regime": 0,
+        },
+        "rejection_counts": {
+            "failed trend filter": 0,
+            "failed RSI filter": 0,
+            "failed volume filter": 0,
+            "failed breakout filter": 0,
+            "failed reward/risk filter": 0,
+            "failed score filter": 0,
+            "failed market regime filter": 0,
+            "insufficient shares": 0,
+        },
+    }
 
     for symbol in symbols:
         history = fetch_history(symbol, period=period, interval=interval)
@@ -1044,8 +1125,35 @@ def run_strategy_backtest(symbols, period: str = "3y", interval: str = "1d", str
                 account_equity=current_equity,
                 strategy_params=strategy_params,
             )
-            if not signal_snapshot or signal_snapshot["signal"] == "NO SIGNAL" or signal_snapshot["shares"] <= 0:
+            if not signal_snapshot:
                 continue
+
+            debug_summary["bars_evaluated"] += 1
+            if signal_snapshot.get("debug_trend_pass"):
+                debug_summary["filter_pass_counts"]["trend"] += 1
+            if signal_snapshot.get("debug_rsi_pass"):
+                debug_summary["filter_pass_counts"]["rsi"] += 1
+            if signal_snapshot.get("debug_volume_pass"):
+                debug_summary["filter_pass_counts"]["volume"] += 1
+            if signal_snapshot.get("debug_breakout_pass"):
+                debug_summary["filter_pass_counts"]["breakout"] += 1
+            if signal_snapshot.get("debug_rr_pass"):
+                debug_summary["filter_pass_counts"]["reward_risk"] += 1
+            if signal_snapshot.get("debug_score_pass"):
+                debug_summary["filter_pass_counts"]["score"] += 1
+            if signal_snapshot.get("debug_market_pass"):
+                debug_summary["filter_pass_counts"]["market_regime"] += 1
+
+            if signal_snapshot["signal"] == "NO SIGNAL":
+                rejection_reason = signal_snapshot.get("rejection_reason", "")
+                if rejection_reason in debug_summary["rejection_counts"]:
+                    debug_summary["rejection_counts"][rejection_reason] += 1
+                continue
+            if signal_snapshot["shares"] <= 0:
+                debug_summary["rejection_counts"]["insufficient shares"] += 1
+                continue
+
+            debug_summary["trades_triggered"] += 1
 
             open_trade = {
                 "signal": signal_snapshot["signal"],
@@ -1090,7 +1198,7 @@ def run_strategy_backtest(symbols, period: str = "3y", interval: str = "1d", str
             )
 
     if not results:
-        return pd.DataFrame(
+        empty_results = pd.DataFrame(
             columns=[
                 "symbol",
                 "signal",
@@ -1109,8 +1217,10 @@ def run_strategy_backtest(symbols, period: str = "3y", interval: str = "1d", str
                 "score",
             ]
         )
+        return (empty_results, debug_summary) if collect_debug else empty_results
 
-    return pd.DataFrame(results).sort_values(["close_time", "symbol"], na_position="last").reset_index(drop=True)
+    results_df = pd.DataFrame(results).sort_values(["close_time", "symbol"], na_position="last").reset_index(drop=True)
+    return (results_df, debug_summary) if collect_debug else results_df
 
 
 def summarize_backtest_results(backtest_trades: pd.DataFrame):
@@ -1196,7 +1306,20 @@ def run_validation_split(symbols, params):
     return all_trades, combined, out_summary
 
 
-def build_strategy_record(strategy_id, version, status, params, summary, promotion_status, paper_probation_passed=False, promotion_date="", promotion_checks=None):
+def build_strategy_record(
+    strategy_id,
+    version,
+    status,
+    params,
+    summary,
+    promotion_status,
+    paper_probation_passed=False,
+    promotion_date="",
+    promotion_checks=None,
+    last_tested_at="",
+    testing_status="historical",
+    latest_result_status="Awaiting test",
+):
     return {
         "id": strategy_id,
         "version": version,
@@ -1208,6 +1331,9 @@ def build_strategy_record(strategy_id, version, status, params, summary, promoti
         "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "promotion_date": promotion_date,
         "promotion_checks": promotion_checks or [],
+        "last_tested_at": last_tested_at,
+        "testing_status": testing_status,
+        "latest_result_status": latest_result_status,
     }
 
 
@@ -1220,6 +1346,87 @@ def format_strategy_timestamp(value):
     if getattr(parsed, "tzinfo", None) is not None:
         parsed = parsed.tz_convert(APP_TIMEZONE)
     return parsed.strftime("%b %d, %Y %-I:%M %p")
+
+
+def normalize_strategy_record(record, default_testing_status="historical"):
+    if not record:
+        return record
+    normalized = dict(record)
+    normalized["parameters"] = sanitize_strategy_parameters(normalized.get("parameters", {}))
+    normalized["last_tested_at"] = normalized.get("last_tested_at") or normalized.get("created_at", "")
+    normalized["testing_status"] = normalized.get("testing_status", default_testing_status)
+    normalized["latest_result_status"] = normalized.get("latest_result_status") or normalized.get("promotion_status", "Awaiting test")
+    normalized["promotion_checks"] = normalized.get("promotion_checks", [])
+    return normalized
+
+
+def evaluate_strategy_record(registry, strategy_record, testing_status=None):
+    strategy_record = normalize_strategy_record(strategy_record, testing_status or strategy_record.get("testing_status", "historical"))
+    _, summary, _ = run_validation_split(BACKTEST_SYMBOLS, strategy_record["parameters"])
+    tested_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    updated_record = {
+        **strategy_record,
+        "results_summary": summary,
+        "last_tested_at": tested_at,
+        "testing_status": testing_status or strategy_record.get("testing_status", "historical"),
+    }
+
+    if updated_record.get("status") == "champion":
+        updated_record["latest_result_status"] = "Active strategy retested"
+        return updated_record
+
+    champion_summary = registry.get("champion", {}).get("results_summary", {})
+    if not champion_summary:
+        _, champion_summary, _ = run_validation_split(BACKTEST_SYMBOLS, registry["champion"]["parameters"])
+        registry["champion"]["results_summary"] = champion_summary
+
+    eligible, checks = compare_strategy_results(champion_summary, summary)
+    failed_reasons = [check["check"] for check in checks if not check["passed"]]
+    updated_record["promotion_checks"] = checks
+    updated_record["paper_probation_passed"] = eligible
+    updated_record["latest_result_status"] = "Promotion ready" if eligible else "Rejected on retest"
+    updated_record["promotion_status"] = (
+        "Promotion ready after retest"
+        if eligible
+        else f"Rejected: {', '.join(failed_reasons) if failed_reasons else 'Promotion gates not met'}"
+    )
+    return updated_record
+
+
+def retest_strategy_by_id(registry, strategy_id):
+    if registry["champion"].get("id") == strategy_id:
+        registry["champion"] = evaluate_strategy_record(registry, registry["champion"], "active")
+        save_strategy_registry(registry)
+        return registry, True
+
+    challenger = registry.get("challenger")
+    if challenger and challenger.get("id") == strategy_id:
+        registry["challenger"] = evaluate_strategy_record(registry, challenger, "scheduled")
+        save_strategy_registry(registry)
+        return registry, True
+
+    experiments = registry.get("experiments", [])
+    for index, experiment in enumerate(experiments):
+        if experiment.get("id") == strategy_id:
+            experiments[index] = evaluate_strategy_record(registry, experiment, "historical")
+            registry["experiments"] = experiments
+            save_strategy_registry(registry)
+            return registry, True
+
+    return registry, False
+
+
+def retest_latest_experiments(registry, limit=3):
+    experiments = registry.get("experiments", [])
+    if not experiments:
+        return registry, 0
+
+    retested = 0
+    for experiment in reversed(experiments[-limit:]):
+        registry, updated = retest_strategy_by_id(registry, experiment.get("id", ""))
+        if updated:
+            retested += 1
+    return registry, retested
 
 
 def research_loop_due(registry):
@@ -1286,6 +1493,9 @@ def advance_strategy_research(registry):
         paper_probation_passed=eligible,
         promotion_date=datetime.now().strftime("%Y-%m-%d %H:%M:%S") if eligible else "",
         promotion_checks=checks,
+        last_tested_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        testing_status="scheduled" if not eligible else "historical",
+        latest_result_status="Promotion ready" if eligible else "Rejected on scheduled test",
     )
     registry.setdefault("experiments", []).append(experiment_record)
     if eligible:
@@ -1294,6 +1504,8 @@ def advance_strategy_research(registry):
             **experiment_record,
             "status": "champion",
             "promotion_status": "Promoted to champion by controlled research loop",
+            "testing_status": "active",
+            "latest_result_status": "Promoted to champion",
         }
         registry["challenger"] = None
     else:
@@ -1301,6 +1513,8 @@ def advance_strategy_research(registry):
             **experiment_record,
             "status": "challenger",
             "promotion_status": f"Rejected: {', '.join(failed_reasons) if failed_reasons else 'Promotion gates not met'}",
+            "testing_status": "scheduled",
+            "latest_result_status": "Scheduled challenger under review",
         }
     registry["last_research_run"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     registry["last_challenger_result"] = experiment_record.get("promotion_status", "")
@@ -1337,6 +1551,8 @@ def promote_challenger(registry):
         "promotion_status": "Promoted to champion",
         "promotion_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "promotion_checks": checks,
+        "testing_status": "active",
+        "latest_result_status": "Promoted to champion",
     }
     registry["challenger"] = None
     save_strategy_registry(registry)
@@ -1353,6 +1569,8 @@ def rollback_champion(registry):
         **previous,
         "status": "champion",
         "promotion_status": "Restored after rollback",
+        "testing_status": "active",
+        "latest_result_status": "Restored after rollback",
     }
     registry["previous_champion"] = current
     save_strategy_registry(registry)
@@ -1836,11 +2054,20 @@ def render_strategy_lab_section(strategy_registry):
     )
     st.caption(f"Controlled research loop cadence: every {RESEARCH_LOOP_HOURS} hours on app activity.")
 
-    if strategy_registry.get("previous_champion") and st.button("Rollback to Previous Champion", key="rollback-champion-inline", use_container_width=True):
-        strategy_registry, rolled_back = rollback_champion(strategy_registry)
-        if rolled_back:
-            st.success("Previous champion restored")
-            st.rerun()
+    action_col1, action_col2 = st.columns(2)
+    with action_col1:
+        if st.button("Retest Latest Experiments", key="retest-latest-experiments", use_container_width=True):
+            strategy_registry, retested = retest_latest_experiments(strategy_registry)
+            if retested:
+                st.success(f"Retested {retested} recent experiment{'s' if retested != 1 else ''}")
+                st.rerun()
+            st.info("No recent experiments were available to retest.")
+    with action_col2:
+        if strategy_registry.get("previous_champion") and st.button("Rollback to Previous Champion", key="rollback-champion-inline", use_container_width=True):
+            strategy_registry, rolled_back = rollback_champion(strategy_registry)
+            if rolled_back:
+                st.success("Previous champion restored")
+                st.rerun()
 
     champ_col, chall_col = st.columns(2)
     with champ_col:
@@ -1856,6 +2083,16 @@ def render_strategy_lab_section(strategy_registry):
             unsafe_allow_html=True,
         )
         st.caption(f"Promotion date: {format_strategy_timestamp(champion.get('promotion_date', ''))}")
+        st.caption(
+            f"Last tested: {format_strategy_timestamp(champion.get('last_tested_at', ''))} | "
+            f"Status: {champion.get('testing_status', 'active').title()} | "
+            f"Latest result: {champion.get('latest_result_status', 'Awaiting test')}"
+        )
+        if st.button("Retest Champion", key="retest-champion", use_container_width=True):
+            strategy_registry, updated = retest_strategy_by_id(strategy_registry, champion.get("id", ""))
+            if updated:
+                st.success("Champion backtest refreshed")
+                st.rerun()
 
     with chall_col:
         st.markdown("### Challenger Status")
@@ -1871,8 +2108,47 @@ def render_strategy_lab_section(strategy_registry):
                 unsafe_allow_html=True,
             )
             st.caption(f"Recorded: {format_strategy_timestamp(challenger.get('created_at', ''))}")
+            st.caption(
+                f"Last tested: {format_strategy_timestamp(challenger.get('last_tested_at', ''))} | "
+                f"Status: {challenger.get('testing_status', 'scheduled').title()} | "
+                f"Latest result: {challenger.get('latest_result_status', 'Awaiting test')}"
+            )
+            if st.button("Retest Challenger", key="retest-challenger", use_container_width=True):
+                strategy_registry, updated = retest_strategy_by_id(strategy_registry, challenger.get("id", ""))
+                if updated:
+                    st.success("Challenger retested safely")
+                    st.rerun()
         else:
             st.info("No active challenger is currently under review.")
+
+    st.markdown("### Active Testing")
+    active_rows = [
+        {
+            "strategy": strategy_to_label(champion),
+            "testing_status": champion.get("testing_status", "active"),
+            "last_tested_at": format_strategy_timestamp(champion.get("last_tested_at", "")),
+            "latest_result_status": champion.get("latest_result_status", "Awaiting test"),
+            "trades": champion_summary.get("num_trades", 0),
+            "pnl": champion_summary.get("total_pnl", 0.0),
+            "win_rate": champion_summary.get("win_rate", 0.0),
+            "max_drawdown": champion_summary.get("max_drawdown", 0.0),
+        }
+    ]
+    if challenger:
+        challenger_summary = challenger.get("results_summary", {})
+        active_rows.append(
+            {
+                "strategy": strategy_to_label(challenger),
+                "testing_status": challenger.get("testing_status", "scheduled"),
+                "last_tested_at": format_strategy_timestamp(challenger.get("last_tested_at", "")),
+                "latest_result_status": challenger.get("latest_result_status", "Awaiting test"),
+                "trades": challenger_summary.get("num_trades", 0),
+                "pnl": challenger_summary.get("total_pnl", 0.0),
+                "win_rate": challenger_summary.get("win_rate", 0.0),
+                "max_drawdown": challenger_summary.get("max_drawdown", 0.0),
+            }
+        )
+    st.dataframe(pd.DataFrame(active_rows), width="stretch", height=140)
 
     st.markdown("### Latest Experiments")
     experiments = strategy_registry.get("experiments", [])
@@ -1883,6 +2159,9 @@ def render_strategy_lab_section(strategy_registry):
             experiment_rows.append(
                 {
                     "changed_at": format_strategy_timestamp(exp.get("created_at", "")),
+                    "last_tested_at": format_strategy_timestamp(exp.get("last_tested_at", "")),
+                    "testing_status": exp.get("testing_status", "historical"),
+                    "latest_result_status": exp.get("latest_result_status", exp.get("promotion_status", "")),
                     "promotion_date": format_strategy_timestamp(exp.get("promotion_date", "")),
                     "strategy": strategy_to_label(exp),
                     "status": exp.get("promotion_status", ""),
@@ -1893,6 +2172,27 @@ def render_strategy_lab_section(strategy_registry):
                 }
             )
         st.dataframe(pd.DataFrame(experiment_rows), width="stretch", height=260)
+        st.caption("Historical experiments stay saved as reference until you retest them manually.")
+
+        st.markdown("#### Retest Individual Experiments")
+        for exp in reversed(experiments[-3:]):
+            summary = exp.get("results_summary", {})
+            info_col, button_col = st.columns([4, 1])
+            with info_col:
+                st.markdown(
+                    f"**{strategy_to_label(exp)}**  \n"
+                    f"`{exp.get('testing_status', 'historical').title()}` | "
+                    f"Last tested: {format_strategy_timestamp(exp.get('last_tested_at', ''))} | "
+                    f"Result: {exp.get('latest_result_status', exp.get('promotion_status', 'Awaiting test'))} | "
+                    f"P&L: ${summary.get('total_pnl', 0.0):,.2f} | "
+                    f"Win: {summary.get('win_rate', 0.0):.2f}%"
+                )
+            with button_col:
+                if st.button("Retest", key=f"retest-{exp.get('id', '')}", use_container_width=True):
+                    strategy_registry, updated = retest_strategy_by_id(strategy_registry, exp.get("id", ""))
+                    if updated:
+                        st.success(f"Retested {strategy_to_label(exp)}")
+                        st.rerun()
     else:
         st.caption("No experiments logged yet.")
 
@@ -2882,11 +3182,12 @@ elif page == "Strategy Lab":
         f"Backtest universe: {', '.join(BACKTEST_SYMBOLS)} | Lookback: ~3 years of daily candles per symbol"
     )
     with st.spinner("Running strategy lab backtest..."):
-        lab_backtest_trades = run_strategy_backtest(
+        lab_backtest_trades, backtest_debug = run_strategy_backtest(
             tuple(BACKTEST_SYMBOLS),
             period="3y",
             interval="1d",
             strategy_params_json=json.dumps(champion_params, sort_keys=True),
+            collect_debug=True,
         )
     lab_backtest_summary = summarize_backtest_results(lab_backtest_trades)
     lab_backtest_curve = create_paper_performance_curve(lab_backtest_trades)
@@ -2911,6 +3212,46 @@ elif page == "Strategy Lab":
     style_dashboard_chart(ax_lab, "Backtest Equity Curve", "Trade Number", "Account Value")
     fig_lab.tight_layout(pad=1.2)
     st.pyplot(fig_lab)
+
+    st.markdown("#### Backtest Filter Debug")
+    debug1, debug2, debug3 = st.columns(3)
+    debug1.metric("Symbols Scanned", int(backtest_debug.get("symbols_scanned", 0)))
+    debug2.metric("Bars Evaluated", int(backtest_debug.get("bars_evaluated", 0)))
+    debug3.metric("Trades Triggered", int(backtest_debug.get("trades_triggered", 0)))
+
+    pass_counts = backtest_debug.get("filter_pass_counts", {})
+    rejection_counts = backtest_debug.get("rejection_counts", {})
+    pass_rows = pd.DataFrame(
+        [
+            {"filter_stage": "Trend", "passed_count": int(pass_counts.get("trend", 0))},
+            {"filter_stage": "RSI", "passed_count": int(pass_counts.get("rsi", 0))},
+            {"filter_stage": "Volume", "passed_count": int(pass_counts.get("volume", 0))},
+            {"filter_stage": "Breakout", "passed_count": int(pass_counts.get("breakout", 0))},
+            {"filter_stage": "Reward / Risk", "passed_count": int(pass_counts.get("reward_risk", 0))},
+            {"filter_stage": "Score", "passed_count": int(pass_counts.get("score", 0))},
+            {"filter_stage": "Market Regime", "passed_count": int(pass_counts.get("market_regime", 0))},
+        ]
+    )
+    rejection_rows = pd.DataFrame(
+        [
+            {"rejection_reason": reason, "count": int(count)}
+            for reason, count in rejection_counts.items()
+            if int(count) > 0
+        ]
+    ).sort_values("count", ascending=False)
+
+    debug_col1, debug_col2 = st.columns(2)
+    with debug_col1:
+        st.dataframe(pass_rows, width="stretch", height=280)
+    with debug_col2:
+        if rejection_rows.empty:
+            st.success("No rejection reasons were recorded in this backtest run.")
+        else:
+            st.dataframe(rejection_rows, width="stretch", height=280)
+            top_rejection = rejection_rows.iloc[0]
+            st.caption(
+                f"Most common blocker: {top_rejection['rejection_reason']} ({int(top_rejection['count'])} occurrences)"
+            )
 
     st.markdown("### Current Strategy Settings")
     settings_rows = pd.DataFrame(
