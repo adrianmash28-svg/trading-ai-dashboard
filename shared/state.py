@@ -8,6 +8,7 @@ import pandas as pd
 BASE_DIR = Path(__file__).resolve().parent.parent
 STRATEGY_REGISTRY_FILE = BASE_DIR / "strategy_registry.json"
 ALGO_UPDATE_STATE_FILE = BASE_DIR / "algo_update_state.json"
+DEFAULT_MARKET_SYMBOLS = ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "META", "AMZN", "TSLA", "AMD", "IWM", "DIA"]
 
 
 def default_strategy_parameters():
@@ -273,6 +274,29 @@ def get_strategy_lab_experiments_snapshot(limit: int = 50):
     return {
         "total_experiments": len(experiments),
         "items": experiments[: max(limit, 0)],
+    }
+
+
+def get_market_overview_snapshot():
+    summary = get_strategy_lab_summary_snapshot()
+    champion = summary.get("current_champion") or {}
+    challenger = summary.get("current_challenger") or {}
+    tracked_symbols = [
+        {
+            "symbol": symbol,
+            "group": "Index / ETF" if symbol in {"SPY", "QQQ", "IWM", "DIA"} else "Equity",
+        }
+        for symbol in DEFAULT_MARKET_SYMBOLS
+    ]
+    return {
+        "tracked_symbols": tracked_symbols,
+        "tracked_symbol_count": len(tracked_symbols),
+        "market_note": "Initial market surface using the shared tracked universe. Full live charting and symbol detail migration will come later.",
+        "research_worker_status": summary.get("research_worker_status", "offline"),
+        "current_champion_version": champion.get("version"),
+        "current_challenger_version": challenger.get("version") if challenger else None,
+        "last_activity_time": summary.get("last_activity_time", ""),
+        "experiments_tested_today": summary.get("experiments_tested_today", 0),
     }
 
 

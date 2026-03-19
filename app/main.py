@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from app.routes.frontend import router as frontend_router
+from app.routes.market import router as market_router
 from app.routes.strategy_lab import router as strategy_lab_router
 from app.routes.status import router as status_router
 
@@ -20,5 +21,6 @@ def health():
 
 
 app.include_router(frontend_router)
+app.include_router(market_router, prefix="/api")
 app.include_router(status_router, prefix="/api")
 app.include_router(strategy_lab_router, prefix="/api")
