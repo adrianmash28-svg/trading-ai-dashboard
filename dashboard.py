@@ -40,6 +40,7 @@ POLYGON_API_KEY = get_secret("POLYGON_API_KEY", "")
 VERIZON_SMS_GATEWAY = "3109911161@vtext.com"
 
 PAPER_TRADES_FILE = "paper_trades.csv"
+TRADE_LOG_FILE = "trade_log.csv"
 DEFAULT_SYMBOLS = ["AAPL", "MSFT", "NVDA", "META", "AMZN", "TSLA", "AMD", "QQQ", "SPY", "IWM", "DIA", "BTC-USD", "ETH-USD"]
 BACKTEST_SYMBOLS = ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "META", "AMZN", "TSLA", "AMD", "IWM", "DIA"]
 STRATEGY_REGISTRY_FILE = "strategy_registry.json"
@@ -515,6 +516,85 @@ def load_paper_trades():
 
 def save_paper_trades(df: pd.DataFrame):
     df.to_csv(PAPER_TRADES_FILE, index=False)
+
+
+def ensure_trade_log_file():
+    cols = [
+        "symbol",
+        "score",
+        "reason",
+        "timeframe",
+        "entry",
+        "stop_loss",
+        "take_profit",
+        "take_profit_1",
+        "take_profit_2",
+        "pnl",
+        "result",
+        "signal",
+        "status",
+        "timestamp",
+        "close_time",
+        "exit_price",
+        "exit_reason",
+    ]
+    if not os.path.exists(TRADE_LOG_FILE):
+        pd.DataFrame(columns=cols).to_csv(TRADE_LOG_FILE, index=False)
+        return
+
+    try:
+        df = pd.read_csv(TRADE_LOG_FILE)
+        changed = False
+        for col in cols:
+            if col not in df.columns:
+                df[col] = ""
+                changed = True
+        if changed:
+            df = df[cols]
+            df.to_csv(TRADE_LOG_FILE, index=False)
+    except Exception:
+        pd.DataFrame(columns=cols).to_csv(TRADE_LOG_FILE, index=False)
+
+
+def load_trade_log():
+    ensure_trade_log_file()
+    return pd.read_csv(TRADE_LOG_FILE)
+
+
+def save_trade_log(df: pd.DataFrame):
+    df.to_csv(TRADE_LOG_FILE, index=False)
+
+
+def sync_trade_log_from_closed_trades(closed_trades_df: pd.DataFrame):
+    ensure_trade_log_file()
+    if closed_trades_df is None or closed_trades_df.empty:
+        return load_trade_log()
+
+    trade_log = load_trade_log()
+    completed = closed_trades_df.copy()
+    completed["take_profit"] = completed.get("take_profit_2", "")
+    completed["timestamp"] = completed.get("timestamp", completed.get("time", ""))
+    completed["result"] = completed.get("result", "").replace("", pd.NA)
+    completed["result"] = completed["result"].fillna(
+        completed["status"].astype(str).apply(lambda status: "win" if "WIN" in status else "loss")
+    )
+    keep_cols = [
+        "symbol", "score", "reason", "timeframe", "entry", "stop_loss", "take_profit",
+        "take_profit_1", "take_profit_2", "pnl", "result", "signal", "status",
+        "timestamp", "close_time", "exit_price", "exit_reason",
+    ]
+    for col in keep_cols:
+        if col not in completed.columns:
+            completed[col] = ""
+    completed = completed[keep_cols].copy()
+
+    combined = pd.concat([trade_log, completed], ignore_index=True)
+    combined = combined.drop_duplicates(
+        subset=["symbol", "timestamp", "close_time", "entry", "signal"],
+        keep="last",
+    )
+    save_trade_log(combined)
+    return combined
 
 
 @st.cache_data(ttl=120)
@@ -1153,18 +1233,23 @@ def run_strategy_backtest(symbols, period: str = "3y", interval: str = "1d", str
                             "symbol": symbol,
                             "signal": open_trade["signal"],
                             "time": current_time,
+                            "timestamp": open_trade.get("timestamp", str(open_trade["entry_time"])),
                             "entry_time": open_trade["entry_time"],
                             "close_time": current_time,
+                            "timeframe": open_trade.get("timeframe", "1d"),
                             "entry": open_trade["entry"],
                             "stop_loss": open_trade["stop_loss"],
+                            "take_profit": open_trade["take_profit_2"],
                             "take_profit_1": open_trade["take_profit_1"],
                             "take_profit_2": open_trade["take_profit_2"],
                             "shares": open_trade["shares"],
                             "status": status,
+                            "result": "win" if status == "CLOSED WIN" else "loss",
                             "exit_price": exit_price,
                             "exit_reason": exit_reason,
                             "pnl": pnl,
                             "score": open_trade["score"],
+                            "reason": open_trade.get("reason", ""),
                         }
                     )
                     open_trade = None
@@ -1214,6 +1299,8 @@ def run_strategy_backtest(symbols, period: str = "3y", interval: str = "1d", str
             open_trade = {
                 "signal": signal_snapshot["signal"],
                 "entry_time": current_time,
+                "timestamp": signal_snapshot.get("timestamp", str(current_time)),
+                "timeframe": signal_snapshot.get("timeframe", "1d"),
                 "entry": float(signal_snapshot["entry"]),
                 "stop_loss": float(signal_snapshot["stop_loss"]),
                 "take_profit_1": float(signal_snapshot["take_profit_1"]),
@@ -1222,6 +1309,7 @@ def run_strategy_backtest(symbols, period: str = "3y", interval: str = "1d", str
                 "shares_remaining": float(signal_snapshot["shares"]),
                 "tp1_hit": False,
                 "score": int(signal_snapshot["score"]),
+                "reason": str(signal_snapshot.get("reason", "")),
             }
 
         if open_trade is not None:
@@ -1238,18 +1326,23 @@ def run_strategy_backtest(symbols, period: str = "3y", interval: str = "1d", str
                     "symbol": symbol,
                     "signal": open_trade["signal"],
                     "time": final_time,
+                    "timestamp": open_trade.get("timestamp", str(open_trade["entry_time"])),
                     "entry_time": open_trade["entry_time"],
                     "close_time": final_time,
+                    "timeframe": open_trade.get("timeframe", "1d"),
                     "entry": open_trade["entry"],
                     "stop_loss": open_trade["stop_loss"],
+                    "take_profit": open_trade["take_profit_2"],
                     "take_profit_1": open_trade["take_profit_1"],
                     "take_profit_2": open_trade["take_profit_2"],
                     "shares": open_trade["shares"],
                     "status": "CLOSED WIN" if pnl >= 0 else "CLOSED LOSS",
+                    "result": "win" if pnl >= 0 else "loss",
                     "exit_price": round(final_close, 4),
                     "exit_reason": "END OF TEST",
                     "pnl": pnl,
                     "score": open_trade["score"],
+                    "reason": open_trade.get("reason", ""),
                 }
             )
 
@@ -1259,18 +1352,23 @@ def run_strategy_backtest(symbols, period: str = "3y", interval: str = "1d", str
                 "symbol",
                 "signal",
                 "time",
+                "timestamp",
                 "entry_time",
                 "close_time",
+                "timeframe",
                 "entry",
                 "stop_loss",
+                "take_profit",
                 "take_profit_1",
                 "take_profit_2",
                 "shares",
                 "status",
+                "result",
                 "exit_price",
                 "exit_reason",
                 "pnl",
                 "score",
+                "reason",
             ]
         )
         return (empty_results, debug_summary) if collect_debug else empty_results
@@ -1288,13 +1386,58 @@ def summarize_backtest_results(backtest_trades: pd.DataFrame):
             "average_loss": 0.0,
             "max_drawdown": 0.0,
             "num_trades": 0,
+            "average_pnl_per_trade": 0.0,
+            "win_rate_by_reason": {},
+            "win_rate_by_score_range": {},
+            "pnl_by_symbol": {},
+            "learning_penalty": 0,
+            "learning_reward": 0,
+            "learning_score": 0,
         }
 
     trades = backtest_trades.copy()
     trades["pnl"] = pd.to_numeric(trades["pnl"], errors="coerce").fillna(0.0)
+    trades["score"] = pd.to_numeric(trades.get("score", 0), errors="coerce").fillna(0.0)
+    trades["result"] = trades.get("result", "").replace("", pd.NA)
+    trades["result"] = trades["result"].fillna(
+        trades["pnl"].apply(lambda pnl: "win" if pnl > 0 else "loss")
+    )
+    trades["reason"] = trades.get("reason", "").replace("", "Unspecified").fillna("Unspecified")
+    trades["timeframe"] = trades.get("timeframe", "Unknown").replace("", "Unknown").fillna("Unknown")
+    trades["score_range"] = pd.cut(
+        trades["score"],
+        bins=[-0.1, 50, 70, float("inf")],
+        labels=["0-50", "50-70", "70+"],
+        include_lowest=True,
+    ).astype(str)
     wins = trades[trades["pnl"] > 0]
     losses = trades[trades["pnl"] < 0]
     backtest_curve = create_paper_performance_curve(trades)
+    reason_win_rates = (
+        trades.groupby("reason", dropna=False)["result"]
+        .apply(lambda s: round((s == "win").mean() * 100, 2))
+        .to_dict()
+    )
+    score_win_rates = (
+        trades.groupby("score_range", dropna=False)["result"]
+        .apply(lambda s: round((s == "win").mean() * 100, 2))
+        .to_dict()
+    )
+    pnl_by_symbol = (
+        trades.groupby("symbol", dropna=False)["pnl"]
+        .sum()
+        .round(2)
+        .to_dict()
+    )
+    poor_reasons = sum(1 for value in reason_win_rates.values() if float(value) < 40.0)
+    poor_score_ranges = sum(1 for value in score_win_rates.values() if value != "nan" and float(value) < 40.0)
+    poor_symbols = sum(1 for value in pnl_by_symbol.values() if float(value) < 0.0)
+    strong_reasons = sum(1 for value in reason_win_rates.values() if float(value) >= 55.0)
+    strong_score_ranges = sum(1 for value in score_win_rates.values() if value != "nan" and float(value) >= 55.0)
+    strong_symbols = sum(1 for value in pnl_by_symbol.values() if float(value) > 0.0)
+    learning_penalty = poor_reasons + poor_score_ranges + poor_symbols
+    learning_reward = strong_reasons + strong_score_ranges + strong_symbols
+    learning_score = learning_reward - learning_penalty
 
     return {
         "total_pnl": round(float(trades["pnl"].sum()), 2),
@@ -1303,6 +1446,13 @@ def summarize_backtest_results(backtest_trades: pd.DataFrame):
         "average_loss": round(float(losses["pnl"].mean()), 2) if not losses.empty else 0.0,
         "max_drawdown": round(float(backtest_curve["drawdown"].min()), 2) if not backtest_curve.empty else 0.0,
         "num_trades": int(len(trades)),
+        "average_pnl_per_trade": round(float(trades["pnl"].mean()), 2) if not trades.empty else 0.0,
+        "win_rate_by_reason": reason_win_rates,
+        "win_rate_by_score_range": score_win_rates,
+        "pnl_by_symbol": pnl_by_symbol,
+        "learning_penalty": int(learning_penalty),
+        "learning_reward": int(learning_reward),
+        "learning_score": int(learning_score),
     }
 
 
@@ -1334,6 +1484,14 @@ def compare_strategy_results(champion_summary, challenger_summary):
             "passed": challenger_summary.get("out_of_sample_pnl", 0.0) >= champion_summary.get("out_of_sample_pnl", 0.0)
             and challenger_summary.get("out_of_sample_win_rate", 0.0) >= champion_summary.get("out_of_sample_win_rate", 0.0),
             "detail": f"P&L ${challenger_summary.get('out_of_sample_pnl', 0.0):,.2f} | Win {challenger_summary.get('out_of_sample_win_rate', 0.0):.2f}%",
+        },
+        {
+            "check": "Trade-pattern quality not worse",
+            "passed": challenger_summary.get("learning_score", 0) >= champion_summary.get("learning_score", 0),
+            "detail": (
+                f"Score {challenger_summary.get('learning_score', 0)} vs {champion_summary.get('learning_score', 0)} | "
+                f"Penalty {challenger_summary.get('learning_penalty', 0)}"
+            ),
         },
     ]
     return all(check["passed"] for check in checks), checks
@@ -2084,14 +2242,23 @@ def render_trade_insights_section(trade_log: pd.DataFrame):
         .reset_index(name="total_trades")
         .sort_values(["total_trades", "timeframe"], ascending=[False, True])
     )
+    pnl_by_symbol = (
+        insights_log.groupby("symbol", dropna=False)["pnl"]
+        .sum()
+        .reset_index(name="total_pnl")
+        .sort_values(["total_pnl", "symbol"], ascending=[False, True])
+    )
 
-    insight_col1, insight_col2 = st.columns(2)
+    insight_col1, insight_col2, insight_col3 = st.columns(3)
     with insight_col1:
         st.caption("Win Rate by Score Range")
         st.dataframe(score_win_rates, width="stretch", height=160)
     with insight_col2:
         st.caption("Total Trades by Timeframe")
         st.dataframe(timeframe_totals, width="stretch", height=160)
+    with insight_col3:
+        st.caption("P&L by Symbol")
+        st.dataframe(pnl_by_symbol, width="stretch", height=160)
 
     display_columns = [
         col for col in [
@@ -2895,7 +3062,7 @@ save_paper_trades(paper)
 
 open_trades = paper[paper["status"].astype(str) == "OPEN"].copy()
 closed_trades = paper[paper["status"].astype(str).str.startswith("CLOSED")].copy()
-trade_log = closed_trades.copy()
+trade_log = sync_trade_log_from_closed_trades(closed_trades)
 if not trade_log.empty and "result" in trade_log.columns:
     missing_result = trade_log["result"].astype(str).str.strip() == ""
     trade_log.loc[missing_result, "result"] = trade_log.loc[missing_result, "status"].astype(str).apply(
