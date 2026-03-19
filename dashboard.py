@@ -64,7 +64,8 @@ APPROVED_RR_WEIGHTS = [10, 20, 24]
 MIN_PROMOTION_TRADES = 30
 MAX_DRAWDOWN_DEGRADATION = 0.10
 APP_TIMEZONE = ZoneInfo("America/Los_Angeles")
-RESEARCH_LOOP_HOURS = 4
+RESEARCH_LOOP_MINUTES = 20
+RESEARCH_CATCHUP_LIMIT = 3
 MAX_ONLINE_SCORE_ADJUSTMENT = 6
 NEWS_LOOKBACK_HOURS = 48
 
@@ -157,6 +158,9 @@ def default_strategy_registry():
         "experiment_index": 0,
         "last_research_run": "",
         "last_challenger_result": "",
+        "last_promotion_at": "",
+        "last_rejection_reason": "",
+        "promotion_history": [],
     }
 
 
@@ -258,6 +262,10 @@ def default_algo_update_state():
         "last_message": "",
         "last_pnl": 0.0,
         "last_win_rate": 0.0,
+        "last_trade_count": 0,
+        "last_experiments_tested": 0,
+        "last_promoted_since_update": False,
+        "last_rejected_since_update": False,
     }
 
 
@@ -1408,6 +1416,59 @@ def normalize_strategy_record(record, default_testing_status="historical"):
     return normalized
 
 
+def parse_strategy_datetime(value: str):
+    if not value:
+        return None
+    parsed = pd.to_datetime(value, errors="coerce")
+    if pd.isna(parsed):
+        return None
+    if getattr(parsed, "tzinfo", None) is None:
+        return parsed.tz_localize(APP_TIMEZONE)
+    return parsed.tz_convert(APP_TIMEZONE)
+
+
+def summarize_research_activity(registry, since_time: str = ""):
+    since_dt = parse_strategy_datetime(since_time)
+    now_local = datetime.now(APP_TIMEZONE)
+    experiments = registry.get("experiments", [])
+    experiments_tested = 0
+    experiments_tested_today = 0
+    promoted_count = 0
+    rejected_count = 0
+    last_rejection_reason = registry.get("last_rejection_reason", "") or "None"
+
+    for exp in experiments:
+        created_dt = parse_strategy_datetime(exp.get("created_at", ""))
+        if created_dt and created_dt.date() == now_local.date():
+            experiments_tested_today += 1
+        if since_dt and created_dt and created_dt > since_dt:
+            experiments_tested += 1
+            promotion_text = str(exp.get("promotion_status", ""))
+            if exp.get("promotion_date") and "Promoted" in promotion_text:
+                promoted_count += 1
+            if "Rejected" in promotion_text:
+                rejected_count += 1
+
+    if since_dt is None:
+        experiments_tested = len(experiments)
+        promoted_count = sum(
+            1 for exp in experiments
+            if exp.get("promotion_date") and "Promoted" in str(exp.get("promotion_status", ""))
+        )
+        rejected_count = sum(
+            1 for exp in experiments
+            if "Rejected" in str(exp.get("promotion_status", ""))
+        )
+
+    return {
+        "experiments_tested": experiments_tested,
+        "experiments_tested_today": experiments_tested_today,
+        "promoted_count": promoted_count,
+        "rejected_count": rejected_count,
+        "last_rejection_reason": last_rejection_reason,
+    }
+
+
 def evaluate_strategy_record(registry, strategy_record, testing_status=None):
     strategy_record = normalize_strategy_record(strategy_record, testing_status or strategy_record.get("testing_status", "historical"))
     _, summary, _ = run_validation_split(BACKTEST_SYMBOLS, strategy_record["parameters"])
@@ -1481,33 +1542,26 @@ def research_loop_due(registry):
     last_run = registry.get("last_research_run", "")
     if not last_run:
         return True
-    parsed = pd.to_datetime(last_run, errors="coerce")
-    if pd.isna(parsed):
+    parsed = parse_strategy_datetime(last_run)
+    if parsed is None:
         return True
-    if getattr(parsed, "tzinfo", None) is None:
-        parsed = parsed.tz_localize(APP_TIMEZONE)
-    else:
-        parsed = parsed.tz_convert(APP_TIMEZONE)
-    return datetime.now(APP_TIMEZONE) - parsed >= timedelta(hours=RESEARCH_LOOP_HOURS)
+    return datetime.now(APP_TIMEZONE) - parsed >= timedelta(minutes=RESEARCH_LOOP_MINUTES)
 
 
 def get_next_research_run(registry):
     last_run = registry.get("last_research_run", "")
     if not last_run:
         return datetime.now(APP_TIMEZONE)
-    parsed = pd.to_datetime(last_run, errors="coerce")
-    if pd.isna(parsed):
+    parsed = parse_strategy_datetime(last_run)
+    if parsed is None:
         return datetime.now(APP_TIMEZONE)
-    if getattr(parsed, "tzinfo", None) is None:
-        parsed = parsed.tz_localize(APP_TIMEZONE)
-    else:
-        parsed = parsed.tz_convert(APP_TIMEZONE)
-    return parsed + timedelta(hours=RESEARCH_LOOP_HOURS)
+    return parsed + timedelta(minutes=RESEARCH_LOOP_MINUTES)
 
 
 def advance_strategy_research(registry):
     base_params = registry["champion"]["parameters"]
     candidates = generate_strategy_candidates(base_params)
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     if not candidates:
         return registry
 
@@ -1523,7 +1577,8 @@ def advance_strategy_research(registry):
             break
 
     if next_candidate is None:
-        registry["last_research_run"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        registry["last_research_run"] = now_str
+        registry["last_challenger_result"] = "No new approved challenger variation available"
         return registry
 
     _, challenger_summary, _ = run_validation_split(BACKTEST_SYMBOLS, next_candidate)
@@ -1539,9 +1594,9 @@ def advance_strategy_research(registry):
         challenger_summary,
         "Promoted to champion" if eligible else f"Rejected: {', '.join(failed_reasons) if failed_reasons else 'Promotion gates not met'}",
         paper_probation_passed=eligible,
-        promotion_date=datetime.now().strftime("%Y-%m-%d %H:%M:%S") if eligible else "",
+        promotion_date=now_str if eligible else "",
         promotion_checks=checks,
-        last_tested_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        last_tested_at=now_str,
         testing_status="scheduled" if not eligible else "historical",
         latest_result_status="Promotion ready" if eligible else "Rejected on scheduled test",
     )
@@ -1555,6 +1610,14 @@ def advance_strategy_research(registry):
             "testing_status": "active",
             "latest_result_status": "Promoted to champion",
         }
+        registry["last_promotion_at"] = now_str
+        registry.setdefault("promotion_history", []).append(
+            {
+                "promoted_at": now_str,
+                "previous_champion": strategy_to_label(registry.get("previous_champion", {"id": "unknown", "version": "?"})),
+                "new_champion": strategy_to_label(registry["champion"]),
+            }
+        )
         registry["challenger"] = None
     else:
         registry["challenger"] = {
@@ -1564,19 +1627,37 @@ def advance_strategy_research(registry):
             "testing_status": "scheduled",
             "latest_result_status": "Scheduled challenger under review",
         }
-    registry["last_research_run"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        registry["last_rejection_reason"] = ", ".join(failed_reasons) if failed_reasons else "Promotion gates not met"
+    registry["last_research_run"] = now_str
     registry["last_challenger_result"] = experiment_record.get("promotion_status", "")
     save_strategy_registry(registry)
     return registry
 
 
-def maybe_run_controlled_research_loop(registry):
-    if not research_loop_due(registry):
-        return registry
+def run_continuous_research_loop(registry):
     if not registry["champion"].get("results_summary"):
         _, champion_summary, _ = run_validation_split(BACKTEST_SYMBOLS, registry["champion"]["parameters"])
         registry["champion"]["results_summary"] = champion_summary
     return advance_strategy_research(registry)
+
+
+def maybe_run_controlled_research_loop(registry):
+    if not research_loop_due(registry):
+        return registry
+
+    last_run = parse_strategy_datetime(registry.get("last_research_run", ""))
+    now_local = datetime.now(APP_TIMEZONE)
+    if last_run is None:
+        iterations = 1
+    else:
+        iterations = max(int((now_local - last_run) // timedelta(minutes=RESEARCH_LOOP_MINUTES)), 1)
+    iterations = min(iterations, RESEARCH_CATCHUP_LIMIT)
+
+    for _ in range(iterations):
+        registry = run_continuous_research_loop(registry)
+        if not research_loop_due(registry):
+            break
+    return registry
 
 
 def promote_challenger(registry):
@@ -1589,19 +1670,29 @@ def promote_challenger(registry):
     if not eligible:
         registry["challenger"]["promotion_status"] = "Rejected: Manual promotion checks failed"
         registry["challenger"]["promotion_checks"] = checks
+        registry["last_rejection_reason"] = "Manual promotion checks failed"
         save_strategy_registry(registry)
         return registry, False
 
     registry["previous_champion"] = registry["champion"]
+    promoted_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     registry["champion"] = {
         **challenger,
         "status": "champion",
         "promotion_status": "Promoted to champion",
-        "promotion_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "promotion_date": promoted_at,
         "promotion_checks": checks,
         "testing_status": "active",
         "latest_result_status": "Promoted to champion",
     }
+    registry["last_promotion_at"] = promoted_at
+    registry.setdefault("promotion_history", []).append(
+        {
+            "promoted_at": promoted_at,
+            "previous_champion": strategy_to_label(registry.get("previous_champion", {"id": "unknown", "version": "?"})),
+            "new_champion": strategy_to_label(registry["champion"]),
+        }
+    )
     registry["challenger"] = None
     save_strategy_registry(registry)
     return registry, True
@@ -1637,19 +1728,26 @@ def get_current_algorithm_summary(registry):
     return champion_summary
 
 
-def build_algo_update_message(summary, changed):
+def build_algo_update_message(summary, changed, research_summary=None):
     pnl_value = float(summary.get("total_pnl", 245.30))
     win_rate_value = float(summary.get("win_rate", 58.2))
     trades_value = int(summary.get("num_trades", 42))
     current_time = datetime.now(APP_TIMEZONE).strftime("%-I:%M %p")
     pnl_prefix = "+" if pnl_value >= 0 else "-"
     status_label = "UPDATED" if changed else "STABLE"
+    research_summary = research_summary or {}
+    experiments_tested = int(research_summary.get("experiments_tested", 0))
+    promoted_since_update = "Yes" if int(research_summary.get("promoted_count", 0)) > 0 else "No"
+    rejected_since_update = "Yes" if int(research_summary.get("rejected_count", 0)) > 0 else "No"
     return (
         "📊 Algo Update\n\n"
         f"P&L: {pnl_prefix}${abs(pnl_value):.2f}\n"
         f"Win Rate: {win_rate_value:.1f}%\n"
         f"Trades: {trades_value}\n"
-        f"Status: {status_label}\n\n"
+        f"Status: {status_label}\n"
+        f"Experiments Tested: {experiments_tested}\n"
+        f"Promoted Since Last Update: {promoted_since_update}\n"
+        f"Rejected Since Last Update: {rejected_since_update}\n\n"
         f"⏱ {current_time}"
     )
 
@@ -1659,6 +1757,7 @@ def maybe_send_algorithm_status_update(registry):
     state = load_algo_update_state()
     current_signature, current_signature_hash = build_strategy_signature(registry["champion"])
     summary = get_current_algorithm_summary(registry)
+    research_summary = summarize_research_activity(registry, state.get("last_sent_at", ""))
     latest_slot = get_latest_schedule_slot(now_local)
     latest_slot_key = latest_slot.isoformat()
 
@@ -1669,10 +1768,11 @@ def maybe_send_algorithm_status_update(registry):
             "next_slot": get_next_schedule_slot(now_local),
             "summary": summary,
             "signature_hash": current_signature_hash,
+            "research_summary": research_summary,
         }
 
     changed = bool(state.get("last_strategy_signature_hash")) and state.get("last_strategy_signature_hash") != current_signature_hash
-    message = build_algo_update_message(summary, changed)
+    message = build_algo_update_message(summary, changed, research_summary)
     send_ok, send_error = send_sms_alert(message)
 
     if send_ok:
@@ -1685,6 +1785,10 @@ def maybe_send_algorithm_status_update(registry):
                 "last_message": message,
                 "last_pnl": summary.get("total_pnl", 0.0),
                 "last_win_rate": summary.get("win_rate", 0.0),
+                "last_trade_count": summary.get("num_trades", 0),
+                "last_experiments_tested": research_summary.get("experiments_tested", 0),
+                "last_promoted_since_update": int(research_summary.get("promoted_count", 0)) > 0,
+                "last_rejected_since_update": int(research_summary.get("rejected_count", 0)) > 0,
             }
         )
         save_algo_update_state(state)
@@ -1701,6 +1805,7 @@ def maybe_send_algorithm_status_update(registry):
         "summary": summary,
         "signature_hash": current_signature_hash,
         "changed": changed,
+        "research_summary": research_summary,
     }
 
 
@@ -2092,8 +2197,10 @@ def render_strategy_lab_section(strategy_registry):
     latest_experiment = strategy_registry.get("experiments", [])[-1] if strategy_registry.get("experiments") else None
     champion_summary = champion.get("results_summary", {})
     next_research_run = get_next_research_run(strategy_registry)
+    algo_state = load_algo_update_state()
+    research_summary_since_update = summarize_research_activity(strategy_registry, algo_state.get("last_sent_at", ""))
     last_research_run_raw = strategy_registry.get("last_research_run", "")
-    last_promotion_raw = champion.get("promotion_date", "")
+    last_promotion_raw = strategy_registry.get("last_promotion_at", "") or champion.get("promotion_date", "")
 
     def parse_strategy_time(value: str):
         if not value:
@@ -2147,7 +2254,10 @@ def render_strategy_lab_section(strategy_registry):
             "Last Result",
             strategy_registry.get("last_challenger_result", "Not yet run") or "Not yet run",
         )
-    st.caption(f"Controlled research loop cadence: every {RESEARCH_LOOP_HOURS} hours on app activity.")
+    st.caption(
+        f"Continuous research cadence: every {RESEARCH_LOOP_MINUTES} minutes on app activity. "
+        "4-hour texts are summary-only and do not control when challengers are tested."
+    )
 
     meta1, meta2, meta3 = st.columns(3)
     with meta1:
@@ -2162,10 +2272,24 @@ def render_strategy_lab_section(strategy_registry):
         render_lab_status_card("Last Promotion Date", format_strategy_timestamp(last_promotion_raw))
     with meta5:
         explanation_text = (
-            f"Challengers are tested on the {RESEARCH_LOOP_HOURS}-hour research cadence. "
+            f"Challengers are tested on the {RESEARCH_LOOP_MINUTES}-minute research cadence. "
             "The live algorithm only changes when promotion gates are passed."
         )
         render_lab_status_card("How Promotion Works", explanation_text)
+
+    insight1, insight2, insight3 = st.columns(3)
+    with insight1:
+        render_lab_status_card("Experiments Tested Today", str(research_summary_since_update.get("experiments_tested_today", 0)))
+    with insight2:
+        render_lab_status_card("Experiments Since Last Update", str(research_summary_since_update.get("experiments_tested", 0)))
+    with insight3:
+        render_lab_status_card("Last Update Sent", format_strategy_timestamp(algo_state.get("last_sent_at", "")))
+
+    insight4, insight5 = st.columns(2)
+    with insight4:
+        render_lab_status_card("Last Promotion Time", format_strategy_timestamp(last_promotion_raw))
+    with insight5:
+        render_lab_status_card("Last Rejection Reason", strategy_registry.get("last_rejection_reason", "") or "None")
 
     action_col1, action_col2 = st.columns(2)
     with action_col1:
