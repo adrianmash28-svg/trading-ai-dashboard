@@ -828,65 +828,110 @@ def build_signal_snapshot(
     timeframe = "15m"
     snapshot_timestamp = str(work_df.index[-1])
     preferred_direction = "LONG" if long_score >= short_score else "SHORT"
-    selected_score = long_score if preferred_direction == "LONG" else short_score
-    selected_trend_pass = trend_up if preferred_direction == "LONG" else trend_down
-    selected_rsi_pass = rsi14 > params["rsi_long_min"] if preferred_direction == "LONG" else rsi14 < params["rsi_short_max"]
-    selected_volume_pass = rel_vol >= params["rel_vol_min"]
-    selected_breakout_pass = confirmed_breakout if preferred_direction == "LONG" else confirmed_breakdown
-    selected_rr = long_rr if preferred_direction == "LONG" else short_rr
-    selected_rr_pass = selected_rr >= 2.0
-    selected_score_pass = selected_score >= params["score_threshold"]
-    selected_market_pass = allow_long if preferred_direction == "LONG" else allow_short
+    long_core_conditions = {
+        "trend": trend_up,
+        "rsi": rsi14 > params["rsi_long_min"],
+        "volume": rel_vol >= params["rel_vol_min"],
+        "breakout": confirmed_breakout,
+        "reward_risk": long_rr >= 2.0,
+        "market_regime": allow_long,
+    }
+    short_core_conditions = {
+        "trend": trend_down,
+        "rsi": rsi14 < params["rsi_short_max"],
+        "volume": rel_vol >= params["rel_vol_min"],
+        "breakout": confirmed_breakdown,
+        "reward_risk": short_rr >= 2.0,
+        "market_regime": allow_short,
+    }
+    long_online_adjustment = max(
+        min(news_context["news_adjustment"] + macro_context["macro_adjustment_long"], MAX_ONLINE_SCORE_ADJUSTMENT),
+        -MAX_ONLINE_SCORE_ADJUSTMENT,
+    )
+    short_online_adjustment = max(
+        min(news_context["news_adjustment"] + macro_context["macro_adjustment_short"], MAX_ONLINE_SCORE_ADJUSTMENT),
+        -MAX_ONLINE_SCORE_ADJUSTMENT,
+    )
+    long_final_score = int(max(0, min(100, long_score + long_online_adjustment)))
+    short_final_score = int(max(0, min(100, short_score + short_online_adjustment)))
+    long_score_pass = long_final_score >= params["score_threshold"]
+    short_score_pass = short_final_score >= params["score_threshold"]
+    long_candidate_valid = all(long_core_conditions.values()) and long_score_pass
+    short_candidate_valid = all(short_core_conditions.values()) and short_score_pass
 
-    rejection_reason = ""
-    if not selected_trend_pass:
-        rejection_reason = "failed trend filter"
-    elif not selected_rsi_pass:
-        rejection_reason = "failed RSI filter"
-    elif not selected_volume_pass:
-        rejection_reason = "failed volume filter"
-    elif not selected_breakout_pass:
-        rejection_reason = "failed breakout filter"
-    elif not selected_rr_pass:
-        rejection_reason = "failed reward/risk filter"
-    elif not selected_score_pass:
-        rejection_reason = "failed score filter"
-    elif not selected_market_pass:
-        rejection_reason = "failed market regime filter"
+    selected_direction = preferred_direction
+    selected_conditions = long_core_conditions if selected_direction == "LONG" else short_core_conditions
+    selected_score = long_final_score if selected_direction == "LONG" else short_final_score
+    selected_base_score = long_score if selected_direction == "LONG" else short_score
+    selected_score_pass = long_score_pass if selected_direction == "LONG" else short_score_pass
 
-    if long_score >= short_score and long_score >= params["score_threshold"] and trend_up and rel_vol >= params["rel_vol_min"] and rsi14 > params["rsi_long_min"] and long_rr >= 2.0 and confirmed_breakout and allow_long:
+    if long_candidate_valid and (not short_candidate_valid or long_final_score >= short_final_score):
         signal = "LONG SETUP"
         base_score = long_score
+        online_adjustment = long_online_adjustment
+        score = long_final_score
         risk = long_risk * params["stop_multiplier"]
         stop_loss = round(long_stop_base, 4)
         tp1 = round(close_price + max(risk * params["tp1_multiplier"], recent_range * 0.2), 4)
         tp2 = round(close_price + max(risk * params["tp2_multiplier"], recent_range * 0.35), 4)
         reason = long_reason
-    elif short_score > long_score and short_score >= params["score_threshold"] and trend_down and rel_vol >= params["rel_vol_min"] and rsi14 < params["rsi_short_max"] and short_rr >= 2.0 and confirmed_breakdown and allow_short:
+        selected_direction = "LONG"
+        selected_conditions = long_core_conditions
+        selected_score = long_final_score
+        selected_base_score = long_score
+        selected_score_pass = long_score_pass
+    elif short_candidate_valid:
         signal = "SHORT SETUP"
         base_score = short_score
+        online_adjustment = short_online_adjustment
+        score = short_final_score
         risk = short_risk * params["stop_multiplier"]
         stop_loss = round(short_stop_base, 4)
         tp1 = round(close_price - max(risk * params["tp1_multiplier"], recent_range * 0.2), 4)
         tp2 = round(close_price - max(risk * params["tp2_multiplier"], recent_range * 0.35), 4)
         reason = short_reason
+        selected_direction = "SHORT"
+        selected_conditions = short_core_conditions
+        selected_score = short_final_score
+        selected_base_score = short_score
+        selected_score_pass = short_score_pass
     else:
         signal = "NO SIGNAL"
-        base_score = max(long_score, short_score)
-        risk = long_risk if long_score >= short_score else short_risk
-        stop_loss = round(close_price + short_risk, 4)
-        tp1 = round(close_price - max(short_risk * 1.5, recent_range * 0.2), 4)
-        tp2 = round(close_price - max(short_risk * 2.3, recent_range * 0.35), 4)
-        reason = long_reason if long_score >= short_score else short_reason
+        if preferred_direction == "LONG":
+            base_score = long_score
+            online_adjustment = long_online_adjustment
+            score = long_final_score
+            risk = long_risk * params["stop_multiplier"]
+            stop_loss = round(long_stop_base, 4)
+            tp1 = round(close_price + max(risk * params["tp1_multiplier"], recent_range * 0.2), 4)
+            tp2 = round(close_price + max(risk * params["tp2_multiplier"], recent_range * 0.35), 4)
+            reason = long_reason
+        else:
+            base_score = short_score
+            online_adjustment = short_online_adjustment
+            score = short_final_score
+            risk = short_risk * params["stop_multiplier"]
+            stop_loss = round(short_stop_base, 4)
+            tp1 = round(close_price - max(risk * params["tp1_multiplier"], recent_range * 0.2), 4)
+            tp2 = round(close_price - max(risk * params["tp2_multiplier"], recent_range * 0.35), 4)
+            reason = short_reason
 
-    if signal == "LONG SETUP":
-        online_adjustment = news_context["news_adjustment"] + macro_context["macro_adjustment_long"]
-    elif signal == "SHORT SETUP":
-        online_adjustment = news_context["news_adjustment"] + macro_context["macro_adjustment_short"]
-    else:
-        online_adjustment = 0
-    online_adjustment = max(min(online_adjustment, MAX_ONLINE_SCORE_ADJUSTMENT), -MAX_ONLINE_SCORE_ADJUSTMENT)
-    score = int(max(0, min(100, base_score + online_adjustment)))
+    failed_conditions = []
+    if not selected_conditions.get("trend", False):
+        failed_conditions.append("failed trend filter")
+    if not selected_conditions.get("rsi", False):
+        failed_conditions.append("failed RSI filter")
+    if not selected_conditions.get("volume", False):
+        failed_conditions.append("failed volume filter")
+    if not selected_conditions.get("breakout", False):
+        failed_conditions.append("failed breakout filter")
+    if not selected_conditions.get("reward_risk", False):
+        failed_conditions.append("failed reward/risk filter")
+    if not selected_score_pass:
+        failed_conditions.append("failed score filter")
+    if not selected_conditions.get("market_regime", False):
+        failed_conditions.append("failed market regime filter")
+    rejection_reason = failed_conditions[0] if failed_conditions else ""
 
     risk_fraction = get_risk_fraction(score)
     risk_budget = max(float(account_equity) * risk_fraction, 0.0)
@@ -916,14 +961,17 @@ def build_signal_snapshot(
         "news_affected": "Yes" if news_context["news_affected"] else "No",
         "rel_vol": round(rel_vol, 2),
         "change_pct": round(change_pct, 2),
-        "preferred_direction": preferred_direction,
-        "debug_trend_pass": selected_trend_pass,
-        "debug_rsi_pass": selected_rsi_pass,
-        "debug_volume_pass": selected_volume_pass,
-        "debug_breakout_pass": selected_breakout_pass,
-        "debug_rr_pass": selected_rr_pass,
+        "preferred_direction": selected_direction,
+        "debug_trend_pass": selected_conditions.get("trend", False),
+        "debug_rsi_pass": selected_conditions.get("rsi", False),
+        "debug_volume_pass": selected_conditions.get("volume", False),
+        "debug_breakout_pass": selected_conditions.get("breakout", False),
+        "debug_rr_pass": selected_conditions.get("reward_risk", False),
         "debug_score_pass": selected_score_pass,
-        "debug_market_pass": selected_market_pass,
+        "debug_market_pass": selected_conditions.get("market_regime", False),
+        "debug_selected_base_score": int(selected_base_score),
+        "debug_selected_final_score": int(selected_score),
+        "debug_failed_conditions": ", ".join(failed_conditions),
         "rejection_reason": rejection_reason if signal == "NO SIGNAL" else "",
     }
 
