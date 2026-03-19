@@ -6,3 +6,5 @@ yfinance
 mplfinance
 requests
 openai
+fastapi
+uvicorn
