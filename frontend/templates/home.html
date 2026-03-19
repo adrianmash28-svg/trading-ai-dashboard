@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+
+{% block content %}
+  <section class="hero">
+    <div class="hero-eyebrow">Professional Migration</div>
+    <h1>Mash Terminal</h1>
+    <p>The next-generation research and trading control layer for the platform. This new frontend runs alongside Streamlit and surfaces live strategy intelligence, worker activity, and experiment progress through the FastAPI stack.</p>
+    <div class="hero-actions">
+      <a class="button" href="/command-center">Open Command Center</a>
+      <a class="button secondary" href="/strategy-lab">Open Strategy Lab</a>
+    </div>
+  </section>
+
+  <section class="grid" id="home-stats"></section>
+
+  <section class="section">
+    <div class="section-header">
+      <div>
+        <h2 class="section-title">What This Platform Does</h2>
+        <div class="section-copy">A simple entry point for the future product shell, powered by the same shared state and research worker already running behind the scenes.</div>
+      </div>
+    </div>
+    <div class="grid compact">
+      <article class="card featured">
+        <div class="label">Live Research</div>
+        <div class="value">Continuous Strategy Testing</div>
+        <div class="subvalue copy-block">The research worker continuously evaluates challenger variations, logs outcomes, and feeds the Strategy Lab without requiring the Streamlit app to stay open.</div>
+      </article>
+      <article class="card">
+        <div class="label">Shared State</div>
+        <div class="value">One Source Of Truth</div>
+        <div class="subvalue copy-block">Champion state, challenger history, and research activity are all centralized so the future web app, worker, and current tools stay aligned.</div>
+      </article>
+      <article class="card">
+        <div class="label">Operational View</div>
+        <div class="value">Command Center Ready</div>
+        <div class="subvalue copy-block">The new Command Center gives the future app a clean high-level operational layer without replacing the Streamlit workflow yet.</div>
+      </article>
+    </div>
+  </section>
+{% endblock %}
+
+{% block page_script %}
+  <script>
+    const homeStats = document.getElementById("home-stats");
+
+    async function loadHome() {
+      try {
+        const response = await fetch("/api/status");
+        const status = await response.json();
+        homeStats.innerHTML = [
+          renderCard("Current Champion", escapeHtml(status.current_champion_id || "—"), `Version: ${escapeHtml(status.current_champion_version ?? "—")}`),
+          renderCard("Worker Status", statusBadge(status.research_worker_status || "offline"), `Last Seen: ${escapeHtml(status.research_worker_last_seen || "—")}`),
+          renderCard("Experiments Today", escapeHtml(status.experiments_tested_today ?? 0), `Total Experiments: ${escapeHtml(status.total_experiments ?? 0)}`),
+          renderCard("Last Activity", escapeHtml(status.last_activity_time || "—"), `Last Result: ${escapeHtml(status.last_challenger_result || "—")}`)
+        ].join("");
+      } catch (error) {
+        homeStats.innerHTML = renderCard("Home", "Unavailable", "Could not load shared status.");
+      }
+    }
+
+    loadHome();
+    setInterval(loadHome, 5000);
+  </script>
+{% endblock %}

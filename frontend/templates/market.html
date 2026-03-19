@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+
+{% block content %}
+  <section class="hero">
+    <div class="hero-eyebrow">Market Surface</div>
+    <h1>Market</h1>
+    <p>A first simple market overview for the new frontend. This page exposes the tracked universe and creates room for future charting, symbol detail, and live market migration without pulling over the full Streamlit market workflow yet.</p>
+  </section>
+
+  <section class="grid" id="market-stats"></section>
+
+  <section class="section split">
+    <div>
+      <div class="section-header">
+        <div>
+          <h2 class="section-title">Tracked Universe</h2>
+          <div class="section-copy">The initial liquid symbol set currently used across the research system and future market surface.</div>
+        </div>
+      </div>
+      <div class="grid compact" id="market-watchlist"></div>
+    </div>
+
+    <div>
+      <div class="section-header">
+        <div>
+          <h2 class="section-title">Future Market Layout</h2>
+          <div class="section-copy">Reserved space for upcoming chart and symbol detail migration.</div>
+        </div>
+      </div>
+      <div class="list">
+        <article class="list-item">
+          <div class="item-top">
+            <div class="item-title">Chart Surface Placeholder</div>
+          </div>
+          <div class="item-meta">This section is intentionally lightweight for now. Future steps can add live charts, symbol drill-downs, and market statistics once the supporting API layer is in place.</div>
+        </article>
+        <article class="list-item">
+          <div class="item-top">
+            <div class="item-title">Migration Note</div>
+          </div>
+          <div class="item-meta" id="market-note">Loading market note...</div>
+        </article>
+      </div>
+    </div>
+  </section>
+{% endblock %}
+
+{% block page_script %}
+  <script>
+    const marketStats = document.getElementById("market-stats");
+    const marketWatchlist = document.getElementById("market-watchlist");
+    const marketNote = document.getElementById("market-note");
+
+    async function loadMarket() {
+      try {
+        const response = await fetch("/api/market/overview");
+        const market = await response.json();
+
+        marketStats.innerHTML = [
+          renderCard("Tracked Symbols", escapeHtml(market.tracked_symbol_count ?? 0), "Initial market universe"),
+          renderCard("Worker Status", statusBadge(market.research_worker_status || "offline"), `Last Activity: ${escapeHtml(market.last_activity_time || "—")}`),
+          renderCard("Champion Version", escapeHtml(market.current_champion_version ?? "—"), `Challenger: ${escapeHtml(market.current_challenger_version ?? "—")}`),
+          renderCard("Experiments Today", escapeHtml(market.experiments_tested_today ?? 0), "Research context available")
+        ].join("");
+
+        const symbols = market.tracked_symbols || [];
+        marketWatchlist.innerHTML = symbols.map((item) => `
+          <article class="card">
+            <div class="label">${escapeHtml(item.group || "Tracked")}</div>
+            <div class="value">${escapeHtml(item.symbol || "—")}</div>
+            <div class="subvalue">Tracked for future market and research views.</div>
+          </article>
+        `).join("");
+
+        marketNote.textContent = market.market_note || "Market overview is available.";
+      } catch (error) {
+        marketStats.innerHTML = renderCard("Market", "Unavailable", "Could not load market overview.");
+        marketWatchlist.innerHTML = "";
+        marketNote.textContent = error.message || "Unknown error";
+      }
+    }
+
+    loadMarket();
+    setInterval(loadMarket, 5000);
+  </script>
+{% endblock %}

@@ -1,77 +1,50 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Mash Terminal Command Center</title>
-  <link rel="stylesheet" href="/static/styles.css" />
-</head>
-<body>
-  <div class="shell">
-    <header class="topbar">
-      <div class="topbar-inner">
-        <a class="brand" href="/">
-          <span class="brand-mark">MT</span>
-          <span>
-            <div class="brand-title">Mash Terminal</div>
-            <div class="brand-subtitle">Research Console</div>
-          </span>
-        </a>
-        <nav class="nav">
-          <a class="nav-link" href="/">Home</a>
-          <a class="nav-link active" href="/command-center">Command Center</a>
-          <a class="nav-link" href="/market">Market</a>
-          <a class="nav-link" href="/strategy-lab">Strategy Lab</a>
-        </nav>
+{% extends "base.html" %}
+
+{% block content %}
+  <section class="hero">
+    <div class="hero-eyebrow">Operational Overview</div>
+    <h1>Command Center</h1>
+    <p>A first lightweight operational page for the new frontend. It pulls together research status, active strategy context, and recent experimentation into one clean surface using the existing shared state APIs.</p>
+  </section>
+
+  <section class="grid" id="command-stats"></section>
+
+  <section class="section">
+    <div class="section-header">
+      <div>
+        <h2 class="section-title">Strategy Snapshot</h2>
+        <div class="section-copy">Current champion and challenger context, surfaced as a compact operational summary rather than a full research drill-down.</div>
       </div>
-    </header>
+    </div>
+    <div class="grid compact" id="command-strategies"></div>
+  </section>
 
-    <main class="page">
-      <section class="hero">
-        <div class="hero-eyebrow">Operational Overview</div>
-        <h1>Command Center</h1>
-        <p>A first lightweight operational page for the new frontend. It pulls together research status, active strategy context, and recent experimentation into one clean surface using the existing shared state APIs.</p>
-      </section>
-
-      <section class="grid" id="command-stats"></section>
-
-      <section class="section">
-        <div class="section-header">
-          <div>
-            <h2 class="section-title">Strategy Snapshot</h2>
-            <div class="section-copy">Current champion and challenger context, surfaced as a compact operational summary rather than a full research drill-down.</div>
-          </div>
-        </div>
-        <div class="grid compact" id="command-strategies"></div>
-      </section>
-
-      <section class="section split">
+  <section class="section split">
+    <div>
+      <div class="section-header">
         <div>
-          <div class="section-header">
-            <div>
-              <h2 class="section-title">Recent Activity</h2>
-              <div class="section-copy">Newest worker activity first, so it is obvious whether the system is actively researching or waiting.</div>
-            </div>
-          </div>
-          <div class="list" id="command-activity"></div>
+          <h2 class="section-title">Recent Activity</h2>
+          <div class="section-copy">Newest worker activity first, so it is obvious whether the system is actively researching or waiting.</div>
         </div>
+      </div>
+      <div class="list" id="command-activity"></div>
+    </div>
 
+    <div>
+      <div class="section-header">
         <div>
-          <div class="section-header">
-            <div>
-              <h2 class="section-title">Recent Experiments</h2>
-              <div class="section-copy">A short summary of the most recent challenger runs and their headline results.</div>
-            </div>
-          </div>
-          <div class="list" id="command-experiments"></div>
+          <h2 class="section-title">Recent Experiments</h2>
+          <div class="section-copy">A short summary of the most recent challenger runs and their headline results.</div>
         </div>
-      </section>
+      </div>
+      <div class="list" id="command-experiments"></div>
+    </div>
+  </section>
 
-      <div class="footer-note">Auto-refreshes every 5 seconds. This is the first operational view in the new frontend and intentionally stays read-only for now.</div>
-    </main>
-  </div>
+  <div class="footer-note">Auto-refreshes every 5 seconds. This is the first operational view in the new frontend and intentionally stays read-only for now.</div>
+{% endblock %}
 
-  <script src="/static/app.js"></script>
+{% block page_script %}
   <script>
     const commandStats = document.getElementById("command-stats");
     const commandStrategies = document.getElementById("command-strategies");
@@ -156,5 +129,4 @@
     loadCommandCenter();
     setInterval(loadCommandCenter, 5000);
   </script>
-</body>
-</html>
+{% endblock %}

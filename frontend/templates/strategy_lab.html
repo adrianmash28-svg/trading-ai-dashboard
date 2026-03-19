@@ -1,77 +1,50 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Mash Terminal Strategy Lab</title>
-  <link rel="stylesheet" href="/static/styles.css" />
-</head>
-<body>
-  <div class="shell">
-    <header class="topbar">
-      <div class="topbar-inner">
-        <a class="brand" href="/">
-          <span class="brand-mark">MT</span>
-          <span>
-            <div class="brand-title">Mash Terminal</div>
-            <div class="brand-subtitle">Research Console</div>
-          </span>
-        </a>
-        <nav class="nav">
-          <a class="nav-link" href="/">Home</a>
-          <a class="nav-link" href="/command-center">Command Center</a>
-          <a class="nav-link" href="/market">Market</a>
-          <a class="nav-link active" href="/strategy-lab">Strategy Lab</a>
-        </nav>
+{% extends "base.html" %}
+
+{% block content %}
+  <section class="hero">
+    <div class="hero-eyebrow">Live Research Surface</div>
+    <h1>Strategy Lab</h1>
+    <p>The first non-Streamlit page for Mash Terminal. This surface reads live research state from FastAPI and gives the future frontend a clean foundation for monitoring experiments, challenger testing, and algorithm stability.</p>
+  </section>
+
+  <section class="grid" id="summary-grid"></section>
+
+  <section class="section">
+    <div class="section-header">
+      <div>
+        <h2 class="section-title">Current Strategies</h2>
+        <div class="section-copy">Champion and challenger snapshots, including the latest backtest result context and current evaluation status.</div>
       </div>
-    </header>
+    </div>
+    <div class="grid compact" id="strategies-grid"></div>
+  </section>
 
-    <main class="page">
-      <section class="hero">
-        <div class="hero-eyebrow">Live Research Surface</div>
-        <h1>Strategy Lab</h1>
-        <p>The first non-Streamlit page for Mash Terminal. This surface reads live research state from FastAPI and gives the future frontend a clean foundation for monitoring experiments, challenger testing, and algorithm stability.</p>
-      </section>
-
-      <section class="grid" id="summary-grid"></section>
-
-      <section class="section">
-        <div class="section-header">
-          <div>
-            <h2 class="section-title">Current Strategies</h2>
-            <div class="section-copy">Champion and challenger snapshots, including the latest backtest result context and current evaluation status.</div>
-          </div>
-        </div>
-        <div class="grid compact" id="strategies-grid"></div>
-      </section>
-
-      <section class="section split">
+  <section class="section split">
+    <div>
+      <div class="section-header">
         <div>
-          <div class="section-header">
-            <div>
-              <h2 class="section-title">Recent Research Activity</h2>
-              <div class="section-copy">Newest worker events first, including generation, testing, and rejection or promotion outcomes.</div>
-            </div>
-          </div>
-          <div class="list" id="activity-list"></div>
+          <h2 class="section-title">Recent Research Activity</h2>
+          <div class="section-copy">Newest worker events first, including generation, testing, and rejection or promotion outcomes.</div>
         </div>
+      </div>
+      <div class="list" id="activity-list"></div>
+    </div>
 
+    <div>
+      <div class="section-header">
         <div>
-          <div class="section-header">
-            <div>
-              <h2 class="section-title">Recent Experiments</h2>
-              <div class="section-copy">Latest challenger records flowing from the shared state layer.</div>
-            </div>
-          </div>
-          <div class="list" id="experiments-list"></div>
+          <h2 class="section-title">Recent Experiments</h2>
+          <div class="section-copy">Latest challenger records flowing from the shared state layer.</div>
         </div>
-      </section>
+      </div>
+      <div class="list" id="experiments-list"></div>
+    </div>
+  </section>
 
-      <div class="footer-note">Auto-refreshes every 5 seconds. Streamlit remains intact while this frontend shell grows alongside it.</div>
-    </main>
-  </div>
+  <div class="footer-note">Auto-refreshes every 5 seconds. Streamlit remains intact while this frontend shell grows alongside it.</div>
+{% endblock %}
 
-  <script src="/static/app.js"></script>
+{% block page_script %}
   <script>
     const summaryGrid = document.getElementById("summary-grid");
     const strategiesGrid = document.getElementById("strategies-grid");
@@ -156,5 +129,4 @@
     loadStrategyLab();
     setInterval(loadStrategyLab, 5000);
   </script>
-</body>
-</html>
+{% endblock %}

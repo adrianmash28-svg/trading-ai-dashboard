@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{ page_title }}</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <div class="topbar-inner">
+        <a class="brand" href="/">
+          <span class="brand-mark">MT</span>
+          <span>
+            <div class="brand-title">Mash Terminal</div>
+            <div class="brand-subtitle">Research Console</div>
+          </span>
+        </a>
+        <nav class="nav">
+          <a class="nav-link{% if active_page == 'home' %} active{% endif %}" href="/">Home</a>
+          <a class="nav-link{% if active_page == 'command-center' %} active{% endif %}" href="/command-center">Command Center</a>
+          <a class="nav-link{% if active_page == 'market' %} active{% endif %}" href="/market">Market</a>
+          <a class="nav-link{% if active_page == 'strategy-lab' %} active{% endif %}" href="/strategy-lab">Strategy Lab</a>
+        </nav>
+      </div>
+    </header>
+
+    <main class="page">
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+
+  <script src="/static/app.js"></script>
+  {% block page_script %}{% endblock %}
+</body>
+</html>
