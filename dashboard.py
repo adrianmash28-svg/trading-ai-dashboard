@@ -165,6 +165,10 @@ def default_strategy_registry():
         "promotion_history": [],
         "research_worker_status": "offline",
         "research_worker_last_seen": "",
+        "last_activity_time": "",
+        "last_experiment_started_at": "",
+        "last_experiment_finished_at": "",
+        "research_activity": [],
     }
 
 
@@ -244,6 +248,10 @@ def load_strategy_registry():
     registry["champion"] = normalize_strategy_record(registry["champion"], "active")
     registry.setdefault("research_worker_status", "offline")
     registry.setdefault("research_worker_last_seen", "")
+    registry.setdefault("last_activity_time", "")
+    registry.setdefault("last_experiment_started_at", "")
+    registry.setdefault("last_experiment_finished_at", "")
+    registry.setdefault("research_activity", [])
     if registry.get("challenger"):
         registry["challenger"]["parameters"] = sanitize_strategy_parameters(registry["challenger"].get("parameters", {}))
         registry["challenger"] = normalize_strategy_record(registry["challenger"], "scheduled")
@@ -1612,6 +1620,90 @@ def research_worker_is_running(registry):
     return datetime.now(APP_TIMEZONE) - last_seen <= timedelta(minutes=RESEARCH_WORKER_HEARTBEAT_MINUTES)
 
 
+def append_research_activity(registry, message: str, event_time: str = "", level: str = "info"):
+    timestamp = event_time or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    event = {
+        "time": timestamp,
+        "message": message,
+        "level": level,
+    }
+    activity = list(registry.get("research_activity", []))
+    activity.append(event)
+    registry["research_activity"] = activity[-40:]
+    registry["last_activity_time"] = timestamp
+    return registry
+
+
+def derive_research_worker_status(registry):
+    stored_status = str(registry.get("research_worker_status", "")).strip().upper()
+    if stored_status in {"TESTING", "PROMOTING", "RUNNING", "IDLE"}:
+        return stored_status
+    if not research_worker_is_running(registry):
+        return "IDLE"
+    challenger = registry.get("challenger")
+    if challenger and str(challenger.get("paper_probation_passed", False)).lower() == "true":
+        return "PROMOTING"
+    if registry.get("last_experiment_started_at") and registry.get("last_experiment_started_at") != registry.get("last_experiment_finished_at"):
+        return "TESTING"
+    return "RUNNING"
+
+
+def build_research_activity_feed(registry):
+    feed_rows = list(registry.get("research_activity", []))
+    champion = registry.get("champion", {})
+    challenger = registry.get("challenger")
+    if registry.get("last_promotion_at"):
+        previous_label = strategy_to_label(registry.get("previous_champion")) if registry.get("previous_champion") else "previous champion"
+        feed_rows.append(
+            {
+                "time": registry.get("last_promotion_at", ""),
+                "message": f"Promoted {strategy_to_label(champion)} over {previous_label}",
+                "level": "success",
+            }
+        )
+    if registry.get("last_rejection_reason"):
+        feed_rows.append(
+            {
+                "time": registry.get("last_experiment_finished_at", "") or registry.get("last_research_run", ""),
+                "message": f"Rejected latest challenger: {registry.get('last_rejection_reason', '')}",
+                "level": "warning",
+            }
+        )
+    if challenger:
+        feed_rows.append(
+            {
+                "time": challenger.get("created_at", ""),
+                "message": f"Generated {strategy_to_label(challenger)}",
+                "level": "info",
+            }
+        )
+        feed_rows.append(
+            {
+                "time": challenger.get("last_tested_at", ""),
+                "message": f"Backtest finished for {strategy_to_label(challenger)}",
+                "level": "info",
+            }
+        )
+    elif registry.get("last_challenger_result") == "No new approved challenger variation available":
+        feed_rows.append(
+            {
+                "time": registry.get("last_research_run", ""),
+                "message": "No valid trade signals found in latest run",
+                "level": "muted",
+            }
+        )
+
+    if not feed_rows:
+        return pd.DataFrame(columns=["time", "message", "level"])
+
+    feed = pd.DataFrame(feed_rows)
+    feed["time_sort"] = pd.to_datetime(feed["time"], errors="coerce")
+    feed = feed.sort_values("time_sort", ascending=False, na_position="last").drop_duplicates(
+        subset=["time", "message"], keep="first"
+    )
+    return feed[["time", "message", "level"]].head(12).reset_index(drop=True)
+
+
 def summarize_research_activity(registry, since_time: str = ""):
     since_dt = parse_strategy_datetime(since_time)
     now_local = datetime.now(APP_TIMEZONE)
@@ -1747,7 +1839,12 @@ def advance_strategy_research(registry):
     base_params = registry["champion"]["parameters"]
     candidates = generate_strategy_candidates(base_params)
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    registry["research_worker_status"] = "TESTING"
+    registry["research_worker_last_seen"] = now_str
+    registry["last_experiment_started_at"] = now_str
     if not candidates:
+        registry["last_experiment_finished_at"] = now_str
+        registry = append_research_activity(registry, "No approved candidate variations available", now_str, "muted")
         return registry
 
     existing_keys = {
@@ -1763,9 +1860,14 @@ def advance_strategy_research(registry):
 
     if next_candidate is None:
         registry["last_research_run"] = now_str
+        registry["last_experiment_finished_at"] = now_str
         registry["last_challenger_result"] = "No new approved challenger variation available"
+        registry["research_worker_status"] = "IDLE"
+        registry = append_research_activity(registry, "No valid trade signals found in latest run", now_str, "muted")
         return registry
 
+    registry = append_research_activity(registry, f"Generated challenger v{len(registry.get('experiments', [])) + 1}", now_str, "info")
+    registry = append_research_activity(registry, f"Backtest started for challenger v{len(registry.get('experiments', [])) + 1}", now_str, "info")
     _, challenger_summary, _ = run_validation_split(BACKTEST_SYMBOLS, next_candidate)
     champion_summary = registry["champion"].get("results_summary", {})
     eligible, checks = compare_strategy_results(champion_summary, challenger_summary) if champion_summary else (False, [])
@@ -1786,6 +1888,7 @@ def advance_strategy_research(registry):
         latest_result_status="Promotion ready" if eligible else "Rejected on scheduled test",
     )
     registry.setdefault("experiments", []).append(experiment_record)
+    registry["last_experiment_finished_at"] = now_str
     if eligible:
         registry["previous_champion"] = registry["champion"]
         registry["champion"] = {
@@ -1803,6 +1906,8 @@ def advance_strategy_research(registry):
                 "new_champion": strategy_to_label(registry["champion"]),
             }
         )
+        registry["research_worker_status"] = "PROMOTING"
+        registry = append_research_activity(registry, f"Promoted {strategy_to_label(registry['champion'])} to champion", now_str, "success")
         registry["challenger"] = None
     else:
         registry["challenger"] = {
@@ -1813,8 +1918,18 @@ def advance_strategy_research(registry):
             "latest_result_status": "Scheduled challenger under review",
         }
         registry["last_rejection_reason"] = ", ".join(failed_reasons) if failed_reasons else "Promotion gates not met"
+        registry["research_worker_status"] = "RUNNING"
+        registry = append_research_activity(
+            registry,
+            f"Rejected {strategy_to_label(experiment_record)}: {registry['last_rejection_reason']}",
+            now_str,
+            "warning",
+        )
     registry["last_research_run"] = now_str
     registry["last_challenger_result"] = experiment_record.get("promotion_status", "")
+    registry = append_research_activity(registry, f"Backtest finished for {strategy_to_label(experiment_record)}", now_str, "info")
+    if registry["research_worker_status"] != "PROMOTING":
+        registry["research_worker_status"] = "IDLE"
     save_strategy_registry(registry)
     return registry
 
@@ -2396,8 +2511,12 @@ def render_strategy_lab_section(strategy_registry):
     last_research_run_raw = strategy_registry.get("last_research_run", "")
     last_promotion_raw = strategy_registry.get("last_promotion_at", "") or champion.get("promotion_date", "")
     worker_running = research_worker_is_running(strategy_registry)
-    worker_status_label = "Running" if worker_running else "Offline / Fallback"
+    worker_status_label = derive_research_worker_status(strategy_registry)
     worker_last_seen = format_strategy_timestamp(strategy_registry.get("research_worker_last_seen", ""))
+    activity_feed = build_research_activity_feed(strategy_registry)
+    last_activity_time = format_strategy_timestamp(strategy_registry.get("last_activity_time", ""))
+    last_experiment_started = format_strategy_timestamp(strategy_registry.get("last_experiment_started_at", ""))
+    last_experiment_finished = format_strategy_timestamp(strategy_registry.get("last_experiment_finished_at", ""))
 
     def parse_strategy_time(value: str):
         if not value:
@@ -2479,6 +2598,59 @@ def render_strategy_lab_section(strategy_registry):
         render_lab_status_card("Research Worker", worker_status_label)
     with worker_col2:
         render_lab_status_card("Worker Last Seen", worker_last_seen)
+
+    st.markdown("### Research Activity")
+    research1, research2, research3 = st.columns(3)
+    with research1:
+        render_lab_status_card("Current Status", worker_status_label)
+    with research2:
+        render_lab_status_card("Last Activity Time", last_activity_time)
+    with research3:
+        render_lab_status_card("Last Experiment Started", last_experiment_started)
+
+    research4, research5, research6 = st.columns(3)
+    with research4:
+        render_lab_status_card("Last Experiment Finished", last_experiment_finished)
+    with research5:
+        render_lab_status_card("Experiments Tested Today", str(research_summary_since_update.get("experiments_tested_today", 0)))
+    with research6:
+        render_lab_status_card("Since Last 4-Hour Update", str(research_summary_since_update.get("experiments_tested", 0)))
+
+    research7, research8, research9 = st.columns(3)
+    with research7:
+        render_lab_status_card("Last Challenger Result", strategy_registry.get("last_challenger_result", "Not yet run") or "Not yet run")
+    with research8:
+        render_lab_status_card("Last Rejection Reason", strategy_registry.get("last_rejection_reason", "") or "None")
+    with research9:
+        render_lab_status_card("Last Promotion Time", format_strategy_timestamp(last_promotion_raw))
+
+    research10, research11 = st.columns(2)
+    with research10:
+        render_lab_status_card("Current Champion Version", strategy_to_label(champion))
+    with research11:
+        render_lab_status_card("Current Challenger Version", strategy_to_label(challenger) if challenger else "None active")
+
+    if "backtest_debug" in st.session_state and st.session_state.backtest_debug:
+        debug_snapshot = st.session_state.backtest_debug
+        st.caption("Latest backtest research counters")
+        snap1, snap2, snap3, snap4, snap5 = st.columns(5)
+        snap1.metric("Symbols Scanned", int(debug_snapshot.get("symbols_scanned", 0)))
+        snap2.metric("Candidates", int(debug_snapshot.get("candidate_setups_found", 0)))
+        snap3.metric("Approved", int(debug_snapshot.get("approved_signals", 0)))
+        snap4.metric("Trades Opened", int(debug_snapshot.get("trades_opened", 0)))
+        snap5.metric("Trades Logged", int(debug_snapshot.get("trades_logged", 0)))
+
+    st.caption(
+        "The research loop keeps testing challengers continuously when active. "
+        "Promotion stays conservative and only happens after the existing gates pass."
+    )
+    st.markdown("#### Recent Activity")
+    if activity_feed.empty:
+        st.info("No recent research events have been recorded yet.")
+    else:
+        formatted_feed = activity_feed.copy()
+        formatted_feed["time"] = formatted_feed["time"].apply(format_strategy_timestamp)
+        st.dataframe(formatted_feed, width="stretch", height=280)
 
     insight1, insight2, insight3 = st.columns(3)
     with insight1:
@@ -3655,6 +3827,7 @@ elif page == "Strategy Lab":
             strategy_params_json=json.dumps(champion_params, sort_keys=True),
             collect_debug=True,
         )
+    st.session_state.backtest_debug = backtest_debug
     lab_backtest_summary = summarize_backtest_results(lab_backtest_trades)
     lab_backtest_curve = create_paper_performance_curve(lab_backtest_trades)
     strategy_registry["champion"]["results_summary"] = lab_backtest_summary
