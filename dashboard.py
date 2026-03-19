@@ -1106,6 +1106,11 @@ def run_strategy_backtest(symbols, period: str = "3y", interval: str = "1d", str
     debug_summary = {
         "symbols_scanned": len(symbols),
         "bars_evaluated": 0,
+        "candidate_setups_found": 0,
+        "approved_signals": 0,
+        "trades_opened": 0,
+        "trades_closed": 0,
+        "trades_logged": 0,
         "trades_triggered": 0,
         "filter_pass_counts": {
             "trend": 0,
@@ -1124,6 +1129,7 @@ def run_strategy_backtest(symbols, period: str = "3y", interval: str = "1d", str
             "failed reward/risk filter": 0,
             "failed score filter": 0,
             "failed market regime filter": 0,
+            "failed final signal approval": 0,
             "insufficient shares": 0,
         },
     }
@@ -1233,6 +1239,8 @@ def run_strategy_backtest(symbols, period: str = "3y", interval: str = "1d", str
 
                 if exit_price is not None:
                     current_equity += pnl
+                    debug_summary["trades_closed"] += 1
+                    debug_summary["trades_logged"] += 1
                     results.append(
                         {
                             "symbol": symbol,
@@ -1275,6 +1283,7 @@ def run_strategy_backtest(symbols, period: str = "3y", interval: str = "1d", str
                 continue
 
             debug_summary["bars_evaluated"] += 1
+            debug_summary["candidate_setups_found"] += 1
             if signal_snapshot.get("debug_trend_pass"):
                 debug_summary["filter_pass_counts"]["trend"] += 1
             if signal_snapshot.get("debug_rsi_pass"):
@@ -1294,12 +1303,16 @@ def run_strategy_backtest(symbols, period: str = "3y", interval: str = "1d", str
                 rejection_reason = signal_snapshot.get("rejection_reason", "")
                 if rejection_reason in debug_summary["rejection_counts"]:
                     debug_summary["rejection_counts"][rejection_reason] += 1
+                else:
+                    debug_summary["rejection_counts"]["failed final signal approval"] += 1
                 continue
+            debug_summary["approved_signals"] += 1
             if signal_snapshot["shares"] <= 0:
                 debug_summary["rejection_counts"]["insufficient shares"] += 1
                 continue
 
             debug_summary["trades_triggered"] += 1
+            debug_summary["trades_opened"] += 1
 
             open_trade = {
                 "signal": signal_snapshot["signal"],
@@ -1326,6 +1339,8 @@ def run_strategy_backtest(symbols, period: str = "3y", interval: str = "1d", str
                 pnl = round((open_trade["entry"] - final_close) * open_trade["shares_remaining"], 2)
             current_equity += pnl
 
+            debug_summary["trades_closed"] += 1
+            debug_summary["trades_logged"] += 1
             results.append(
                 {
                     "symbol": symbol,
@@ -3667,8 +3682,18 @@ elif page == "Strategy Lab":
     st.markdown("#### Backtest Filter Debug")
     debug1, debug2, debug3 = st.columns(3)
     debug1.metric("Symbols Scanned", int(backtest_debug.get("symbols_scanned", 0)))
-    debug2.metric("Bars Evaluated", int(backtest_debug.get("bars_evaluated", 0)))
-    debug3.metric("Trades Triggered", int(backtest_debug.get("trades_triggered", 0)))
+    debug2.metric("Candidate Setups", int(backtest_debug.get("candidate_setups_found", 0)))
+    debug3.metric("Approved Signals", int(backtest_debug.get("approved_signals", 0)))
+
+    debug4, debug5, debug6 = st.columns(3)
+    debug4.metric("Trades Opened", int(backtest_debug.get("trades_opened", 0)))
+    debug5.metric("Trades Closed", int(backtest_debug.get("trades_closed", 0)))
+    debug6.metric("Trades Logged", int(backtest_debug.get("trades_logged", 0)))
+
+    st.caption(
+        f"Bars evaluated: {int(backtest_debug.get('bars_evaluated', 0))} | "
+        f"Legacy triggered count: {int(backtest_debug.get('trades_triggered', 0))}"
+    )
 
     pass_counts = backtest_debug.get("filter_pass_counts", {})
     rejection_counts = backtest_debug.get("rejection_counts", {})
@@ -3681,6 +3706,7 @@ elif page == "Strategy Lab":
             {"filter_stage": "Reward / Risk", "passed_count": int(pass_counts.get("reward_risk", 0))},
             {"filter_stage": "Score", "passed_count": int(pass_counts.get("score", 0))},
             {"filter_stage": "Market Regime", "passed_count": int(pass_counts.get("market_regime", 0))},
+            {"filter_stage": "Final Signal Approval", "passed_count": int(backtest_debug.get("approved_signals", 0))},
         ]
     )
     rejection_rows = pd.DataFrame(
