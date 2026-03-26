@@ -26,3 +26,6 @@ walkforward_period_results.csv
 bias_breakdown.csv
 symbol_breakdown.csv
 top_setups.csv
+
+algo_update_state.json
+strategy_registry.json
