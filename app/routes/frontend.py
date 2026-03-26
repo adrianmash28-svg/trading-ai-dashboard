@@ -15,8 +15,9 @@ templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 def render_frontend_page(request: Request, template_name: str, page_title: str, active_page: str):
     return templates.TemplateResponse(
-        template_name,
-        {
+        request=request,
+        name=template_name,
+        context={
             "request": request,
             "page_title": page_title,
             "active_page": active_page,

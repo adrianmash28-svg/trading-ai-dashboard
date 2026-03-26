@@ -108,6 +108,7 @@
           renderCard("Current Champion", escapeHtml(summary.current_champion?.id || "—"), `Version: ${escapeHtml(summary.current_champion?.version ?? "—")}`),
           renderCard("Current Challenger", escapeHtml(summary.current_challenger?.id || "—"), `Version: ${escapeHtml(summary.current_challenger?.version ?? "—")}`),
           renderCard("Experiments Today", escapeHtml(summary.experiments_tested_today ?? 0), `Last Activity: ${escapeHtml(summary.last_activity_time || "—")}`),
+          renderCard("Paper Tests", escapeHtml(summary.active_paper_tests?.length ?? 0), `Cycle: ${escapeHtml(summary.current_cycle_number ?? 0)}`),
           renderCard("Last Result", escapeHtml(summary.last_challenger_result || "—"), `Rejection: ${escapeHtml(summary.last_rejection_reason || "—")}`)
         ].join("");
 

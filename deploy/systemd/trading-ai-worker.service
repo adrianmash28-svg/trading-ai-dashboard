@@ -1,0 +1,16 @@
+[Unit]
+Description=Trading AI nonstop research worker
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/trading-ai
+Environment="PYTHONUNBUFFERED=1"
+ExecStart=/opt/trading-ai/.venv/bin/python -m app.workers.research_worker
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

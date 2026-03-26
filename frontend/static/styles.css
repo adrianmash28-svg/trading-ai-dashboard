@@ -39,25 +39,30 @@ a {
 
 .shell {
   min-height: 100vh;
+  display: flex;
 }
 
-.topbar {
+.sidebar {
+  width: 280px;
+  border-right: 1px solid var(--border);
+  background: rgba(7, 16, 25, 0.84);
+  backdrop-filter: blur(14px);
   position: sticky;
   top: 0;
-  z-index: 10;
-  backdrop-filter: blur(14px);
-  background: rgba(7, 16, 25, 0.78);
-  border-bottom: 1px solid var(--border);
+  align-self: flex-start;
+  min-height: 100vh;
 }
 
-.topbar-inner {
-  max-width: 1240px;
-  margin: 0 auto;
-  padding: 14px 20px;
+.sidebar-inner {
+  padding: 28px 20px;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
+  flex-direction: column;
+  gap: 28px;
+}
+
+.main {
+  flex: 1;
+  min-width: 0;
 }
 
 .brand {
@@ -92,15 +97,17 @@ a {
 
 .nav {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
 }
 
 .nav-link {
-  padding: 9px 12px;
-  border-radius: 10px;
+  padding: 11px 12px;
+  border-radius: 12px;
   color: var(--muted);
   font-size: 0.92rem;
+  border: 1px solid transparent;
 }
 
 .nav-link.active {
@@ -116,7 +123,7 @@ a {
 .page {
   max-width: 1240px;
   margin: 0 auto;
-  padding: 28px 20px 52px;
+  padding: 32px 28px 52px;
 }
 
 .hero {
@@ -355,12 +362,29 @@ a {
 }
 
 @media (max-width: 920px) {
-  .split {
-    grid-template-columns: 1fr;
+  .shell {
+    flex-direction: column;
   }
 
-  .topbar-inner {
-    align-items: start;
-    flex-direction: column;
+  .sidebar {
+    width: 100%;
+    min-height: auto;
+    position: static;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .sidebar-inner {
+    padding: 18px 20px;
+    gap: 18px;
+  }
+
+  .nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .split {
+    grid-template-columns: 1fr;
   }
 }

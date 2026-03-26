@@ -1,25 +1,33 @@
 from shared.state import (
     append_research_activity,
+    append_worker_log,
     get_api_status_snapshot,
     get_market_overview_snapshot,
     get_strategy_lab_activity_snapshot,
     get_strategy_lab_experiments_snapshot,
+    get_strategy_lab_paper_tests_snapshot,
+    get_strategy_lab_promotions_snapshot,
     get_strategy_lab_summary_snapshot,
     load_algo_update_state,
     load_strategy_registry,
+    record_heartbeat,
     save_algo_update_state,
     save_strategy_registry,
 )
 
 __all__ = [
     "append_research_activity",
+    "append_worker_log",
     "get_api_status_snapshot",
     "get_market_overview_snapshot",
     "get_strategy_lab_activity_snapshot",
     "get_strategy_lab_experiments_snapshot",
+    "get_strategy_lab_paper_tests_snapshot",
+    "get_strategy_lab_promotions_snapshot",
     "get_strategy_lab_summary_snapshot",
     "load_algo_update_state",
     "load_strategy_registry",
+    "record_heartbeat",
     "save_algo_update_state",
     "save_strategy_registry",
 ]
