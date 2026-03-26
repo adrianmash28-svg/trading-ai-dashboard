@@ -1,7 +1,9 @@
 import json
+import os
 from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 from typing import Any
 
 import pandas as pd
@@ -178,8 +180,13 @@ def _load_json(path: Path, default: dict[str, Any]) -> dict[str, Any]:
 
 
 def _save_json(path: Path, payload: dict[str, Any]) -> None:
-    with path.open("w", encoding="utf-8") as file_obj:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as file_obj:
         json.dump(payload, file_obj, indent=2)
+        file_obj.flush()
+        os.fsync(file_obj.fileno())
+        temp_name = file_obj.name
+    os.replace(temp_name, path)
 
 
 def _normalize_results_summary(summary: dict[str, Any] | None) -> dict[str, Any]:
@@ -318,9 +325,11 @@ def normalize_strategy_registry(registry: dict[str, Any] | None) -> dict[str, An
 
 
 def ensure_strategy_registry() -> dict[str, Any]:
-    registry = normalize_strategy_registry(_load_json(STRATEGY_REGISTRY_FILE, default_strategy_registry()))
-    _save_json(STRATEGY_REGISTRY_FILE, registry)
-    return registry
+    if not STRATEGY_REGISTRY_FILE.exists():
+        registry = default_strategy_registry()
+        _save_json(STRATEGY_REGISTRY_FILE, registry)
+        return registry
+    return normalize_strategy_registry(_load_json(STRATEGY_REGISTRY_FILE, default_strategy_registry()))
 
 
 def load_strategy_registry() -> dict[str, Any]:
@@ -334,10 +343,12 @@ def save_strategy_registry(registry: dict[str, Any]) -> dict[str, Any]:
 
 
 def ensure_algo_update_state() -> dict[str, Any]:
-    state = _load_json(ALGO_UPDATE_STATE_FILE, default_algo_update_state())
-    normalized = {**default_algo_update_state(), **state}
-    _save_json(ALGO_UPDATE_STATE_FILE, normalized)
-    return normalized
+    if not ALGO_UPDATE_STATE_FILE.exists():
+        state = default_algo_update_state()
+        _save_json(ALGO_UPDATE_STATE_FILE, state)
+        return state
+    loaded_state = _load_json(ALGO_UPDATE_STATE_FILE, default_algo_update_state())
+    return {**default_algo_update_state(), **loaded_state}
 
 
 def load_algo_update_state() -> dict[str, Any]:

@@ -4,11 +4,11 @@ After=network.target
 
 [Service]
 Type=simple
-User=ubuntu
-Group=ubuntu
-WorkingDirectory=/opt/trading-ai
+User=root
+Group=root
+WorkingDirectory=/root/trading-ai
 Environment="PYTHONUNBUFFERED=1"
-ExecStart=/opt/trading-ai/.venv/bin/python -m app.workers.research_worker
+ExecStart=/root/trading-ai/.venv/bin/python -m app.workers.research_worker
 Restart=always
 RestartSec=5
 

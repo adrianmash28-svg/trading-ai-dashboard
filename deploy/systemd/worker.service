@@ -1,5 +1,5 @@
 [Unit]
-Description=Trading AI FastAPI service
+Description=Trading AI worker compatibility alias
 After=network.target
 
 [Service]
@@ -8,7 +8,7 @@ User=root
 Group=root
 WorkingDirectory=/root/trading-ai
 Environment="PYTHONUNBUFFERED=1"
-ExecStart=/root/trading-ai/.venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+ExecStart=/root/trading-ai/.venv/bin/python -m app.workers.research_worker
 Restart=always
 RestartSec=5
 
